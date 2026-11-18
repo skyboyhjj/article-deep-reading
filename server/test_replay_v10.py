@@ -136,15 +136,21 @@ def main():
     print(f"\n  降级 {out['demoted']} 项（模型判确证但无权威源）")
 
 
+_failures = 0
+
+
+def chk(name, cond):
+    """演示模式与断言模式共用；失败累加到模块级 _failures。"""
+    global _failures
+    print(("[ok] " if cond else "[X ] ") + name)
+    if not cond:
+        _failures += 1
+
+
 def test_all() -> int:
     """断言版：这些是 v1.0 出过错的实例，不能回退。"""
-    bad = 0
-
-    def chk(name, cond):
-        nonlocal bad
-        print(("[ok] " if cond else "[X ] ") + name)
-        if not cond:
-            bad += 1
+    global _failures
+    _failures = 0
 
     calc = pipeline.stage_compute(DOC, {"claims": []})
     st = [r["status"] for r in calc["items"]]
@@ -222,8 +228,8 @@ def test_all() -> int:
     chk("ACM 真权威 → 保持确证", v16v[3] == "确证")
     chk("降级计数为 2", d16 == 2)
 
-    print("\n" + ("v1.0 回放回归通过" if bad == 0 else f"{bad} 项失败"))
-    return 0 if bad == 0 else 1
+    print("\n" + ("v1.0 回放回归通过" if _failures == 0 else f"{_failures} 项失败"))
+    return 0 if _failures == 0 else 1
 
 
 if __name__ == "__main__":

@@ -54,6 +54,7 @@ python server/app.py -p 8123
 
 ```bash
 python3 server/test_safe_eval.py       # 求值器：12 正确 + 18 攻击 + 5 失败用例
+python3 server/test_extract.py         # 抓取层：patch 掉网络，真调 fetch()，覆盖三档 FETCH_BACKEND
 python3 server/test_pipeline_e2e.py    # 五阶段数据流，假模型替身
 ```
 

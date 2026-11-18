@@ -13,6 +13,7 @@ notes 记录降级情况（如"仅取到摘要，无全文"），供下游在结
 from __future__ import annotations
 
 import html as htmllib
+import os
 import re
 import time
 from datetime import datetime, timedelta, timezone

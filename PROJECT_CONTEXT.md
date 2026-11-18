@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.3**（2026-11-17）
+- 当前版本：**v2.4**（2026-11-18）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、10 套 CI 测试。
 
@@ -30,7 +30,7 @@
 | `server/net.py` | **唯一出站口**：统一 CA、超时、两次重试、异常翻译 |
 | `server/doctor.py` | 环境体检：Python、certifi、代理变量、对上游的 TLS 握手 |
 | `server/llm.py` | OpenAI 兼容客户端 |
-| `server/test_*.py` | 10 套测试，见下文「测试」 |
+| `server/test_*.py` | 11 套测试，见下文「测试」 |
 | `web/index.html` | 单页前端（无外部依赖）：Markdown 渲染、窄屏表格转卡片、原文⇄可读版切换 |
 | `skills/article-deep-reading/` | 读解 SOP：`SKILL.md` + `references/checklists.md` + `scripts/`（`extract_wx.py` / `make_appendix.py` / `selfcheck_md.py`） |
 | `skills/math-doc-rigor/` | 数学文档严谨化：六查渲染体检 + 三层标注 + md→PDF 保真流水线 |
@@ -180,17 +180,21 @@ python3 server/doctor.py
 1. `python server/test_replay_v10.py --assert` —— 6 组历史误判回放，v1.0–v1.6 出过的错不许回来
 2. `python server/test_audit.py` —— 空表 / 假算 / 三态判定回归
 3. `python server/test_safe_eval.py` —— 求值器 35 项，绕过即阻断
-4. 推上去看 CI 全绿（10 套一次跑完）
+4. 推上去看 CI 全绿（11 套一次跑完）
+
+改抓取层（`extract.py` 的 `fetch()` 或其分支）后，**必须**跑 `python server/test_extract.py`：
+它是唯一真正调用 `fetch()` 的测试，v2.4 那个「忘 `import os` 导致三条抓取路一起崩」的 bug 就是靠它兜住的。
 
 改动 `skills/` 下的脚本后，另需用 `examples/` 那份成品做一次端到端复跑，确认附录逐字节自校验仍通过。
 
 ## 测试
 
-CI 跑 10 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳过）：
+CI 跑 11 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳过）：
 
 | 测试 | 覆盖 |
 |---|---|
 | `test_safe_eval.py` | 求值器 35 项：12 正确 + 18 攻击 + 5 失败 |
+| `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
 | `test_pipeline_e2e.py` | 五阶段数据流，假模型替身 |
 | `test_video.py` | 视频号路径与 L1 二手标注 |
 | `test_asr.py` | 转录链路（切片、偏移合并、事后校对） |
@@ -298,7 +302,16 @@ CI 跑 10 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 
 - JSON 被 `max_tokens` 截断 → `_salvage_json()` 抢救完整前缀 + 精简重试
 - 出站请求统一走 `server/net.py`，管 CA、超时、重试；配 `server/doctor.py` 体检
-- CI 扩到 10 套测试、`CHANGELOG.md`、`.gitattributes`、README 徽章
+- CI 扩到 10 套测试（v2.4 起 11 套，见 13）、`CHANGELOG.md`、`.gitattributes`、README 徽章
+
+### 13. 抓取层补测（v2.4）
+
+- **根因**：`extract.py` 用了 `os.environ.get(...)`（`fetch()` 判断 `FETCH_BACKEND`、DeepSeek Fetch 取 key 与 base_url），却漏了 `import os`。任何走抓取的链接——公众号、arXiv、通用网页——都在那一行抛 `NameError`，一条都抓不到。**这是条致命路径。**
+- **为什么 CI 没抓到**：`test_pipeline_e2e.py` 走「粘贴正文 + 假模型替身」，压根不经过 `extract.fetch()`。它测的是流水线下半段，上半段是空的。
+- **修复**：补 `import os`；新增 `server/test_extract.py`（11 项，全程不联网），只把最底层 `_get` / `deepseek_fetch` 换成夹具，**真的调用 `fetch()`**，覆盖 `FETCH_BACKEND` 三档与未设置四种情形，另含三条抓取层历史坑回归（`</pre>` 粘段、`data-formula` 公式还原、`var ct` 的 UTC+8）
+- **反向验证**：临时去掉 `import os`，该测试从 11 项全过变成 13 处报错，恢复后全过 —— 证明它抓得住
+- **同类第二处**：`test_replay_v10.py` 的 `chk()` 定义在 `test_all()` 内部，演示模式（不带 `--assert`）必抛 `NameError`；已提到模块级，CI 两种入口都跑。共同点：**某个入口长期没人走，一过去就塌**
+- **文件**：`server/extract.py`、`server/test_extract.py`、`server/test_replay_v10.py`、`.github/workflows/ci.yml`
 
 ## 待办
 

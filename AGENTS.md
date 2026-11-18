@@ -58,6 +58,7 @@
 | v1.9 凭空出处 | 依据写「据 sec.gov」，检索结果里根本没有 sec.gov | 模型自带知识被当成检索结果 | v2.0 第三道闸：援引域名不在本轮结果里 → 降「半对」 |
 | v2.1 指标错 | 语速算出 22.5 字/秒 | 声学只分析第一片 110 秒，字数取全篇 362 秒 | `_acoustic_many()` 多片拼接 |
 | v2.1 自相矛盾 | 判「不实」，「应改为」却写「应查…再判断是否成立」 | 存疑被写成了证伪 | v2.2：无相反证据一律退回「半对」 |
+| v2.4 抓取全崩 | 任何链接都抛 `NameError: name 'os' is not defined` | `extract.py` 用了 `os.environ` 却漏 `import os`；CI 只测流水线下半段（粘贴正文），抓取层零覆盖 | `test_extract.py` 真调 `fetch()`，覆盖 `FETCH_BACKEND` 三档与未设置 |
 
 **共同规律**：最严重的错几乎都不是算错，而是把「没查」写成了「查过」。
 
@@ -79,20 +80,21 @@
 
 ## 五、CI/CD 与质量控制
 
-推 `main` 与 PR 触发 `.github/workflows/ci.yml`，10 套测试串跑，**全部不联网、不花钱**：
+推 `main` 与 PR 触发 `.github/workflows/ci.yml`，11 套测试串跑，**全部不联网、不花钱**：
 
 | 顺序 | 测试 | 覆盖 |
 |---|---|---|
 | 1 | `test_safe_eval.py` | 求值器 35 项：12 正确 + 18 攻击 + 5 失败 —— **绕过即阻断** |
-| 2 | `test_pipeline_e2e.py` | 五阶段数据流，假模型替身 |
-| 3 | `test_video.py` | 视频号路径与 L1 二手标注 |
-| 4 | `test_asr.py` | 转录链路（切片、偏移合并、事后校对），缺 ffmpeg 自行跳过 |
-| 5 | `test_audit.py` | 自产报告审计：空表、假算、三态判定 |
-| 6 | `test_search.py` | 出处检索与权威判定 |
-| 7 | `test_json.py` | JSON 截断抢救与精简重试 |
-| 8 | `test_net.py` | TLS 出口：CA 优先级、重试、错误翻译 |
-| 9 | `test_voice.py` | 语音画像：声学 + 文本双证据 |
-| 10 | `test_replay_v10.py --assert` | 6 组历史误判回放 —— **v1.0–v1.6 出过的错不许回来** |
+| 2 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
+| 3 | `test_pipeline_e2e.py` | 五阶段数据流，假模型替身 |
+| 4 | `test_video.py` | 视频号路径与 L1 二手标注 |
+| 5 | `test_asr.py` | 转录链路（切片、偏移合并、事后校对），缺 ffmpeg 自行跳过 |
+| 6 | `test_audit.py` | 自产报告审计：空表、假算、三态判定 |
+| 7 | `test_search.py` | 出处检索与权威判定 |
+| 8 | `test_json.py` | JSON 截断抢救与精简重试 |
+| 9 | `test_net.py` | TLS 出口：CA 优先级、重试、错误翻译 |
+| 10 | `test_voice.py` | 语音画像：声学 + 文本双证据 |
+| 11 | `test_replay_v10.py --assert` | 6 组历史误判回放 —— **v1.0–v1.6 出过的错不许回来** |
 
 本地跑法（不花钱）：
 
@@ -102,7 +104,8 @@ python3 server/test_replay_v10.py --assert
 ```
 
 **改判定逻辑后的强制顺序**：`test_replay_v10 --assert` → `test_audit` → `test_safe_eval` → 推 CI。
-回放测试是底线，不是形式 —— 它存在的唯一目的是拦住上面那张表里的十个案例。
+**改抓取层后**：`test_extract`（它是唯一真正调用 `extract.fetch()` 的测试）。
+回放与抓取两组测试是底线，不是形式 —— v2.4 那个「忘 `import os` 使三条抓取路一起崩」的 bug，就是因为抓取层长期没有测试才藏住的。
 
 ---
 

@@ -6,6 +6,22 @@
 
 ---
 
+## v2.4 · 2026-11-18
+
+**修一个致命路径 bug：`extract.py` 忘了 `import os`。**
+
+`fetch()` 在判断 `FETCH_BACKEND` 时调 `os.environ.get(...)`（另在 DeepSeek Fetch 的 key 与 base_url 两处），而文件头没有 `import os`。任何走抓取的链接——公众号、arXiv、通用网页——都会在那一行抛 `NameError`，一条都抓不到。
+
+**CI 为什么没抓到**：`test_pipeline_e2e.py` 走「粘贴正文 + 假模型替身」，压根不经过 `extract.fetch()`。它测的是流水线下半段，上半段是空的。
+
+**补的用例**：新增 `server/test_extract.py`（11 项，全程不联网），只把最底层的 `_get` / `deepseek_fetch` 换成夹具，**真的调用 `fetch()`**，覆盖 `FETCH_BACKEND` 三档与未设置四种情形。另含三条抓取层历史坑的回归：`</pre>` 未映射换行导致段落粘连、`data-formula` 公式还原、`var ct` 的 UTC+8 时区。
+
+已做反向验证：临时去掉 `import os`，该测试从 11 项全过变成 13 处报错，恢复后全过——说明它抓得住这个错。
+
+**顺带修了同类第二处**：`test_replay_v10.py` 的 `chk()` 原本定义在 `test_all()` 内部，演示模式（不带 `--assert`）调用它必抛 `NameError`。已提到模块级，CI 里两种入口都跑一次。这类问题的共同点是**某个入口长期没人走**，一走过去就塌。
+
+---
+
 ## v2.3 · 2026-11-17
 
 **把「转录校对」和「疑似转述偏差」两节的职能分开。**

@@ -28,6 +28,10 @@ jobs:
       - name: safe_eval（35 项）
         run: python server/test_safe_eval.py
 
+      # ── 抓取层：patch 掉网络、真调 fetch()，覆盖 FETCH_BACKEND 三档与未设置 ──
+      - name: 抓取层（公众号 / 通用网页 / 回退）
+        run: python server/test_extract.py
+
       # ── 五阶段数据流：假模型替身，不联网不花钱 ──
       - name: pipeline 端到端
         run: python server/test_pipeline_e2e.py
@@ -57,4 +61,6 @@ jobs:
 
       # ── 历史实况回放：v1.0–v1.6 出过的错，不能回来 ──
       - name: 回放回归（6 组历史误判）
-        run: python server/test_replay_v10.py --assert
+        run: |
+          python server/test_replay_v10.py --assert
+          python server/test_replay_v10.py   # 演示模式也要能跑（chk 曾在 test_all 内定义，演示模式必崩）
