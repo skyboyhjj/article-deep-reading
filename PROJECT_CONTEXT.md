@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.4**（2026-11-18）
+- 当前版本：**v2.5**（2026-11-18）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、10 套 CI 测试。
 
@@ -30,7 +30,7 @@
 | `server/net.py` | **唯一出站口**：统一 CA、超时、两次重试、异常翻译 |
 | `server/doctor.py` | 环境体检：Python、certifi、代理变量、对上游的 TLS 握手 |
 | `server/llm.py` | OpenAI 兼容客户端 |
-| `server/test_*.py` | 11 套测试，见下文「测试」 |
+| `server/test_*.py` | 13 套测试，见下文「测试」 |
 | `web/index.html` | 单页前端（无外部依赖）：Markdown 渲染、窄屏表格转卡片、原文⇄可读版切换 |
 | `skills/article-deep-reading/` | 读解 SOP：`SKILL.md` + `references/checklists.md` + `scripts/`（`extract_wx.py` / `make_appendix.py` / `selfcheck_md.py`） |
 | `skills/math-doc-rigor/` | 数学文档严谨化：六查渲染体检 + 三层标注 + md→PDF 保真流水线 |
@@ -180,7 +180,7 @@ python3 server/doctor.py
 1. `python server/test_replay_v10.py --assert` —— 6 组历史误判回放，v1.0–v1.6 出过的错不许回来
 2. `python server/test_audit.py` —— 空表 / 假算 / 三态判定回归
 3. `python server/test_safe_eval.py` —— 求值器 35 项，绕过即阻断
-4. 推上去看 CI 全绿（11 套一次跑完）
+4. 推上去看 CI 全绿（13 套一次跑完）
 
 改抓取层（`extract.py` 的 `fetch()` 或其分支）后，**必须**跑 `python server/test_extract.py`：
 它是唯一真正调用 `fetch()` 的测试，v2.4 那个「忘 `import os` 导致三条抓取路一起崩」的 bug 就是靠它兜住的。
@@ -189,12 +189,14 @@ python3 server/doctor.py
 
 ## 测试
 
-CI 跑 11 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳过）：
+CI 跑 13 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳过）：
 
 | 测试 | 覆盖 |
 |---|---|
 | `test_safe_eval.py` | 求值器 35 项：12 正确 + 18 攻击 + 5 失败 |
 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
+| `test_asr_backend.py` | ASR 适配层 29 项：四档后端判定、`describe` / `audio_spec` / `_api_root`、413·429·5xx·非 JSON·连接异常、`verbose_json` 降级重试、本地 whisper 三种失败、分片偏移三档回退 |
+| `test_doctor.py` | 体检脚本 13 项：代理脱敏、`INSECURE_TLS` 告警、certifi 缺失文案、TLS 三结局、无网跑完返回 0 |
 | `test_pipeline_e2e.py` | 五阶段数据流，假模型替身 |
 | `test_video.py` | 视频号路径与 L1 二手标注 |
 | `test_asr.py` | 转录链路（切片、偏移合并、事后校对） |
@@ -312,6 +314,15 @@ CI 跑 11 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **反向验证**：临时去掉 `import os`，该测试从 11 项全过变成 13 处报错，恢复后全过 —— 证明它抓得住
 - **同类第二处**：`test_replay_v10.py` 的 `chk()` 定义在 `test_all()` 内部，演示模式（不带 `--assert`）必抛 `NameError`；已提到模块级，CI 两种入口都跑。共同点：**某个入口长期没人走，一过去就塌**
 - **文件**：`server/extract.py`、`server/test_extract.py`、`server/test_replay_v10.py`、`.github/workflows/ci.yml`
+
+### 14. ASR 与体检脚本补测（v2.5）
+
+- **根因**：`asr.py` 与 `doctor.py` 此前只在最顺路径被间接走到 —— `test_asr.py` 测的是分片合并与报告节，`doctor.py` 一次都没被测。这与 v2.4 是同一个病：**某个模块长期没有测试，一改就塌**
+- **新增**：`server/test_asr_backend.py`（29 项）覆盖四档后端判定与 auto 两条规则、`describe` / `audio_spec` / `_api_root`、DeepSeek 的 413·429·5xx·非 JSON·连接异常、openai 的 `verbose_json` 降级重试、本地 whisper 三种失败、分片偏移三档回退；`server/test_doctor.py`（13 项）覆盖代理脱敏、`INSECURE_TLS` 告警、certifi 缺失文案、TLS 三结局、`main()` 无网跑完
+- **顺带修的真问题**：`doctor.py` 证书失败时直接读 `exc.verify_message`，该属性并非所有实例都有 —— 取不到就 `AttributeError`，**体检脚本自己崩掉，用户彻底没了线索**。改为取不到时退回 `str(exc)`
+- **反向验证**：把兜底改回原写法，`test_doctor` 立刻变红（1 error），恢复后全绿
+- **测出来的坑**：`call_args_list` 记录的是 `data` 字典引用，重试里 `pop()` 会改掉先前那条记录 —— 断言两次请求差异必须在假 post 内部当场快照
+- **文件**：`server/test_asr_backend.py`、`server/test_doctor.py`、`server/doctor.py`、`.github/workflows/ci.yml`
 
 ## 待办
 

@@ -99,7 +99,10 @@ def check_tls(host: str) -> None:
                 print(f"有效期  {cert.get('notBefore')} → {cert.get('notAfter')}")
                 print("结果    成功")
     except ssl.SSLCertVerificationError as exc:
-        print(f"结果    证书校验失败：{exc.verify_message}")
+        # verify_message 并非所有实例都有（部分平台/手工构造的异常没有该属性），
+        # 体检脚本自己崩掉，用户就彻底没了线索 —— 所以取不到就退回 str(exc)。
+        detail = getattr(exc, "verify_message", "") or str(exc)
+        print(f"结果    证书校验失败：{detail}")
         print("        → 中间人代理或根证书缺失，见文末建议")
     except ssl.SSLError as exc:
         print(f"结果    TLS 错误：{exc}")

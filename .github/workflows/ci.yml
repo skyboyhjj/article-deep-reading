@@ -39,6 +39,10 @@ jobs:
       - name: 视频号路径（L1 二手标注）
         run: python server/test_video.py
 
+      # ── ASR 适配层：后端判定、错误映射、未配置与空转录（不需要 ffmpeg）──
+      - name: ASR 适配层（四档判定 / 413·429·5xx / verbose_json 降级）
+        run: python server/test_asr_backend.py
+
       - name: ASR 链路
         run: python server/test_asr.py
 
@@ -55,6 +59,10 @@ jobs:
 
       - name: TLS 出口（CA 优先级 / 重试 / 错误翻译）
         run: python server/test_net.py
+
+      # ── 体检脚本：它自己崩掉，用户就彻底没了线索 ──
+      - name: 体检脚本（脱敏 / 三种 TLS 结局 / 无网也能跑完）
+        run: python server/test_doctor.py
 
       - name: 语音画像
         run: python server/test_voice.py

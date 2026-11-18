@@ -59,6 +59,8 @@
 | v2.1 指标错 | 语速算出 22.5 字/秒 | 声学只分析第一片 110 秒，字数取全篇 362 秒 | `_acoustic_many()` 多片拼接 |
 | v2.1 自相矛盾 | 判「不实」，「应改为」却写「应查…再判断是否成立」 | 存疑被写成了证伪 | v2.2：无相反证据一律退回「半对」 |
 | v2.4 抓取全崩 | 任何链接都抛 `NameError: name 'os' is not defined` | `extract.py` 用了 `os.environ` 却漏 `import os`；CI 只测流水线下半段（粘贴正文），抓取层零覆盖 | `test_extract.py` 真调 `fetch()`，覆盖 `FETCH_BACKEND` 三档与未设置 |
+| v2.5 体检自崩 | 证书校验失败时体检脚本抛 `AttributeError` | `doctor.py` 直读 `exc.verify_message`，该属性并非所有实例都有 | 取不到退回 `str(exc)`；`test_doctor.py` 覆盖三种 TLS 结局 |
+| v2.5 断言被 mock 骗 | 降级重试用例断言两次请求的 `data` 差异，全部不符 | `call_args_list` 存的是字典**引用**，重试里 `pop()` 改掉了先前那条记录 | 在假 `post` 内部当场快照 `dict(data)` 再断言 |
 
 **共同规律**：最严重的错几乎都不是算错，而是把「没查」写成了「查过」。
 
@@ -80,7 +82,7 @@
 
 ## 五、CI/CD 与质量控制
 
-推 `main` 与 PR 触发 `.github/workflows/ci.yml`，11 套测试串跑，**全部不联网、不花钱**：
+推 `main` 与 PR 触发 `.github/workflows/ci.yml`，13 套测试串跑，**全部不联网、不花钱**：
 
 | 顺序 | 测试 | 覆盖 |
 |---|---|---|
@@ -88,13 +90,15 @@
 | 2 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
 | 3 | `test_pipeline_e2e.py` | 五阶段数据流，假模型替身 |
 | 4 | `test_video.py` | 视频号路径与 L1 二手标注 |
-| 5 | `test_asr.py` | 转录链路（切片、偏移合并、事后校对），缺 ffmpeg 自行跳过 |
-| 6 | `test_audit.py` | 自产报告审计：空表、假算、三态判定 |
-| 7 | `test_search.py` | 出处检索与权威判定 |
-| 8 | `test_json.py` | JSON 截断抢救与精简重试 |
-| 9 | `test_net.py` | TLS 出口：CA 优先级、重试、错误翻译 |
-| 10 | `test_voice.py` | 语音画像：声学 + 文本双证据 |
-| 11 | `test_replay_v10.py --assert` | 6 组历史误判回放 —— **v1.0–v1.6 出过的错不许回来** |
+| 5 | `test_asr_backend.py` | ASR 适配层 29 项：四档后端判定、413·429·5xx·非 JSON·连接异常、`verbose_json` 降级重试、本地 whisper 三种失败、分片偏移三档回退 |
+| 6 | `test_asr.py` | 转录链路（切片、偏移合并、事后校对），缺 ffmpeg 自行跳过 |
+| 7 | `test_audit.py` | 自产报告审计：空表、假算、三态判定 |
+| 8 | `test_search.py` | 出处检索与权威判定 |
+| 9 | `test_json.py` | JSON 截断抢救与精简重试 |
+| 10 | `test_net.py` | TLS 出口：CA 优先级、重试、错误翻译 |
+| 11 | `test_doctor.py` | 体检脚本 13 项：代理脱敏、`INSECURE_TLS` 告警、certifi 缺失文案、TLS 三结局、无网跑完 |
+| 12 | `test_voice.py` | 语音画像：声学 + 文本双证据 |
+| 13 | `test_replay_v10.py --assert` | 6 组历史误判回放 —— **v1.0–v1.6 出过的错不许回来** |
 
 本地跑法（不花钱）：
 

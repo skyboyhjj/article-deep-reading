@@ -6,6 +6,27 @@
 
 ---
 
+## v2.5 · 2026-11-18
+
+**把两个「从没被测试碰过」的模块补上用例，顺带抓出第二处真问题。**
+
+`asr.py` 与 `doctor.py` 在此前 11 套测试里只在最顺的路径上被间接走到：`test_asr.py` 测的是分片合并与报告节，`doctor.py` 一次都没被测过。
+
+新增两套（全程不联网、不需要 ffmpeg）：
+
+| 文件 | 项数 | 覆盖 |
+|---|---|---|
+| `server/test_asr_backend.py` | 29 | 四档后端判定与 auto 的两条规则、`describe` / `audio_spec` / `_api_root`、DeepSeek 的 413·429·5xx·非 JSON·连接异常、openai 的 `verbose_json` 降级重试、本地 whisper 的三种失败、分片偏移三种时长来源的回退次序 |
+| `server/test_doctor.py` | 13 | 代理地址脱敏（密码不许出现在输出里）、`INSECURE_TLS` 警告只在真开启时出现、certifi 缺失的可操作文案、TLS 成功/证书校验失败/连不上三种结局、`main()` 无网也能跑完并返回 0 |
+
+**顺带修的真问题**：`doctor.py` 在证书校验失败时直接读 `exc.verify_message`，而该属性并非所有 `SSLCertVerificationError` 实例都有。取不到就抛 `AttributeError` —— **体检脚本自己崩掉，用户就彻底没了线索**，而这正是它存在的唯一理由。改为取不到时退回 `str(exc)`。
+
+两处都做了反向验证：把 `getattr` 兜底改回原写法，`test_doctor` 立刻变红；恢复后全绿。
+
+**记一笔 mock 的坑**：`verbose_json` 降级那个用例，最初用 `call_args_list` 比对两次请求，结果全错 —— 因为 mock 记录的是 `data` 字典的**引用**，重试时 `pop("response_format")` 把先前那条记录一起改了。改成在假 `post` 内部当场快照才看得准。
+
+---
+
 ## v2.4 · 2026-11-18
 
 **修一个致命路径 bug：`extract.py` 忘了 `import os`。**
