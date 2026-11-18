@@ -32,6 +32,10 @@ jobs:
       - name: HTTP 层（路由 / 校验 / 限流 / SSE 收尾）
         run: python server/test_app.py
 
+      # ── 前后端契约：服务端发的 stage/status，前端必须都认识 ──
+      - name: 前后端契约（标签集合 / 结束态 / done.md）
+        run: python server/test_ui_contract.py
+
       # ── 抓取层：patch 掉网络、真调 fetch()，覆盖 FETCH_BACKEND 三档与未设置 ──
       - name: 抓取层（公众号 / 通用网页 / 回退）
         run: python server/test_extract.py

@@ -1558,6 +1558,9 @@ def analyze(
         yield {"stage": "render", "status": "run", "text": "拼装报告…"}
         commentary = stage_commentary(doc, triage, verify, calc)
         md = render_report(url, doc, triage, verify, calc, commentary)
+        # 必须显式收尾：前端只在 status=run/ok/warn/fail 时改标签，
+        # 少了这一条「成稿」会永远停在「…」（v2.12 实测发现）。
+        yield {"stage": "render", "status": "ok", "text": "报告已生成"}
         yield {"stage": "done", "status": "ok", "text": f"完成（{len(md)} 字符）", "data": {"md": md}}
     except llm.LLMNotConfigured as exc:
         yield {"stage": "triage", "status": "fail", "text": str(exc)}

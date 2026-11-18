@@ -64,6 +64,7 @@
 | v2.6 上限文案偏乐观 | 提示写「粘贴正文上限 20 万字符」，中文实际只能到约 8.6 万字 | 请求体另有 260 KB 字节闸，中文 20 万字符 = 60 万字节，先撞后者 | v2.8 已改准文案；用例断言必须含「8.6 万汉字」 |
 | v2.6 断言抢跑 | 临时上传件的删除断言约 5% 概率失败 | 客户端读到 SSE 结束标记时，服务端 `finally` 里的 `unlink` 可能还没执行 | 改为轮询等条件成立（`wait_until`）；理解「SSE 结束 ≠ 临时文件已清」 |
 | v2.7 skip 不是测 | 「没装 ffmpeg」这条最常见的情形从来没被执行过 | `test_asr` 缺 ffmpeg 时打一句 `[skip]` 就过，等于占位 | `test_media.py` 用假 `subprocess.run` 覆盖全部分支；真 ffmpeg 用例单独 `skipUnless` |
+| v2.12 成稿永转圈 | 报告已出来，「成稿」标签还在显示「…」 | 服务端 render 只发 run 就发 done；前端只在 run/ok/warn/fail 改标签 | 补 render ok 事件 + done 里兜底；`test_ui_contract` 强制「每阶段必须有结束态」 |
 | v2.8 超限污染下一请求 | 超限回复后，同一连接上的下一个请求解析错乱 | 请求体没读完就回复，keep-alive 下残留字节被当成新请求 | `_drain()` 先读完再回（≤5 MB 才 drain）；用例 `test_oversize_does_not_poison_next_request` |
 
 **共同规律**：最严重的错几乎都不是算错，而是把「没查」写成了「查过」。
@@ -88,25 +89,26 @@
 
 ## 五、CI/CD 与质量控制
 
-推 `main` 与 PR 触发 `.github/workflows/ci.yml`，15 套测试串跑，**全部不联网、不花钱**：
+推 `main` 与 PR 触发 `.github/workflows/ci.yml`，16 套测试串跑，**全部不联网、不花钱**：
 
 | 顺序 | 测试 | 覆盖 |
 |---|---|---|
 | 1 | `test_safe_eval.py` | 求值器 35 项：12 正确 + 18 攻击 + 5 失败 —— **绕过即阻断** |
 | 2 | `test_app.py` | HTTP 层 30 项：真起服务打真请求 —— 路由、health 不泄 key、analyze 八条校验、超限后同连接不被污染、SSE 形状与临时件清理、上传六种情形、限流窗口、并发额度（503 与归还） |
-| 3 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
-| 4 | `test_pipeline_e2e.py` | 五阶段数据流，假模型替身 |
-| 5 | `test_video.py` | 视频号路径与 L1 二手标注 |
-| 6 | `test_media.py` | 媒体层 34 项：假 ffmpeg 覆盖全部失败分支与命令形状（无 ffmpeg、切片失败、时长 `N/A`、产出过小），真 ffmpeg 用例另设 skip |
-| 7 | `test_asr_backend.py` | ASR 适配层 29 项：四档后端判定、413·429·5xx·非 JSON·连接异常、`verbose_json` 降级重试、本地 whisper 三种失败、分片偏移三档回退 |
-| 8 | `test_asr.py` | 转录链路（切片、偏移合并、事后校对），缺 ffmpeg 自行跳过 |
-| 9 | `test_audit.py` | 自产报告审计：空表、假算、三态判定 |
-| 10 | `test_search.py` | 出处检索与权威判定 |
-| 11 | `test_json.py` | JSON 截断抢救与精简重试 |
-| 12 | `test_net.py` | TLS 出口：CA 优先级、重试、错误翻译 |
-| 13 | `test_doctor.py` | 体检脚本 13 项：代理脱敏、`INSECURE_TLS` 告警、certifi 缺失文案、TLS 三结局、无网跑完 |
-| 14 | `test_voice.py` | 语音画像：声学 + 文本双证据 |
-| 15 | `test_replay_v10.py --assert` | 6 组历史误判回放 —— **v1.0–v1.6 出过的错不许回来** |
+| 3 | `test_ui_contract.py` | 前后端契约 7 项：stage 集合双向核对、LABEL 一致、每阶段必须有结束态、done 必带 md |
+| 4 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
+| 5 | `test_pipeline_e2e.py` | 五阶段数据流，假模型替身 |
+| 6 | `test_video.py` | 视频号路径与 L1 二手标注 |
+| 7 | `test_media.py` | 媒体层 34 项：假 ffmpeg 覆盖全部失败分支与命令形状（无 ffmpeg、切片失败、时长 `N/A`、产出过小），真 ffmpeg 用例另设 skip |
+| 8 | `test_asr_backend.py` | ASR 适配层 29 项：四档后端判定、413·429·5xx·非 JSON·连接异常、`verbose_json` 降级重试、本地 whisper 三种失败、分片偏移三档回退 |
+| 9 | `test_asr.py` | 转录链路（切片、偏移合并、事后校对），缺 ffmpeg 自行跳过 |
+| 10 | `test_audit.py` | 自产报告审计：空表、假算、三态判定 |
+| 11 | `test_search.py` | 出处检索与权威判定 |
+| 12 | `test_json.py` | JSON 截断抢救与精简重试 |
+| 13 | `test_net.py` | TLS 出口：CA 优先级、重试、错误翻译 |
+| 14 | `test_doctor.py` | 体检脚本 13 项：代理脱敏、`INSECURE_TLS` 告警、certifi 缺失文案、TLS 三结局、无网跑完 |
+| 15 | `test_voice.py` | 语音画像：声学 + 文本双证据 |
+| 16 | `test_replay_v10.py --assert` | 6 组历史误判回放 —— **v1.0–v1.6 出过的错不许回来** |
 
 本地跑法（不花钱）：
 

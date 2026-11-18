@@ -453,6 +453,7 @@ function handleEvent(chunk){
   if(stage === "extract" && data) showExtract(data);
 
   if(stage === "done" && data && data.md){
+    setStage("render", "ok");   // 兜底：服务端若漏发 render ok，这里补上，避免「成稿」永远转圈
     $("rview").innerHTML = md2html(data.md);
     $("report").textContent = data.md;
     $("reportCard").style.display = "block";

@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.11**（2026-11-18）
+- 当前版本：**v2.12**（2026-11-18）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、10 套 CI 测试。
 
@@ -30,7 +30,7 @@
 | `server/net.py` | **唯一出站口**：统一 CA、超时、两次重试、异常翻译 |
 | `server/doctor.py` | 环境体检：Python、certifi、代理变量、对上游的 TLS 握手 |
 | `server/llm.py` | OpenAI 兼容客户端 |
-| `server/test_*.py` | 15 套测试，见下文「测试」 |
+| `server/test_*.py` | 16 套测试，见下文「测试」 |
 | `web/index.html` | 单页前端（无外部依赖）：Markdown 渲染、窄屏表格转卡片、原文⇄可读版切换 |
 | `skills/article-deep-reading/` | 读解 SOP：`SKILL.md` + `references/checklists.md` + `scripts/`（`extract_wx.py` / `make_appendix.py` / `selfcheck_md.py`） |
 | `skills/math-doc-rigor/` | 数学文档严谨化：六查渲染体检 + 三层标注 + md→PDF 保真流水线 |
@@ -180,7 +180,7 @@ python3 server/doctor.py
 1. `python server/test_replay_v10.py --assert` —— 6 组历史误判回放，v1.0–v1.6 出过的错不许回来
 2. `python server/test_audit.py` —— 空表 / 假算 / 三态判定回归
 3. `python server/test_safe_eval.py` —— 求值器 35 项，绕过即阻断
-4. 推上去看 CI 全绿（15 套一次跑完）
+4. 推上去看 CI 全绿（16 套一次跑完）
 
 改抓取层（`extract.py` 的 `fetch()` 或其分支）后，**必须**跑 `python server/test_extract.py`：
 它是唯一真正调用 `fetch()` 的测试，v2.4 那个「忘 `import os` 导致三条抓取路一起崩」的 bug 就是靠它兜住的。
@@ -189,12 +189,13 @@ python3 server/doctor.py
 
 ## 测试
 
-CI 跑 15 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳过；`test_media` 的分支层不依赖 ffmpeg，真实层才 skip）：
+CI 跑 16 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳过；`test_media` 的分支层不依赖 ffmpeg，真实层才 skip）：
 
 | 测试 | 覆盖 |
 |---|---|
 | `test_safe_eval.py` | 求值器 35 项：12 正确 + 18 攻击 + 5 失败 |
 | `test_app.py` | HTTP 层 30 项：真起服务打真请求 —— 路由、health 不泄 key、analyze 八条校验、超限后同连接不被污染、SSE 形状与临时件清理、上传六种情形、限流窗口、并发额度（503 与归还） |
+| `test_ui_contract.py` | 前后端契约 7 项：stage 集合互查、LABEL 一致、每阶段必须有结束态、done 必带 md |
 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
 | `test_media.py` | 媒体层 34 项：假 ffmpeg 覆盖全部失败分支与命令形状（无 ffmpeg、切片失败、时长 `N/A`、产出过小），真 ffmpeg 用例另设 skip |
 | `test_asr_backend.py` | ASR 适配层 29 项：四档后端判定、`describe` / `audio_spec` / `_api_root`、413·429·5xx·非 JSON·连接异常、`verbose_json` 降级重试、本地 whisper 三种失败、分片偏移三档回退 |
@@ -377,6 +378,15 @@ CI 跑 15 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **最危险的形态**：有默认值的外部输入 —— 不崩，但静默读错对象。补规则：输入缺失时应报错退出，不要 fallback
 - **落地**：`AGENTS.md`（技术约定）、`docs/SOP.md`（§6 第 9 条）；审计明细见本地 `审计_算据脚本可复现性.md`
 - **文件**：`AGENTS.md`、`docs/SOP.md`
+
+### 21. 端到端实测与「成稿永转圈」修复（v2.12）
+
+- **做法**：本地起假模型端点 + 测试网页，让 app 真跑五阶段；再按 `index.html` 逻辑复刻状态机，把事件流喂进去推演界面；两遍、每遍先网址后音频
+- **发现的 bug**：服务端 `render` 只发 `run` 就发 `done`，前端标签永远停在「…」——报告已出现但界面显示「仍在成稿」
+- **修复**：`pipeline.py` 补 `render ok` 事件；`index.html` 的 `done` 分支加 `setStage("render","ok")` 兜底
+- **新增**：`server/test_ui_contract.py`（7 项）—— stage 集合双向核对、LABEL 一致、每阶段必须有结束态、done 必带 md。反向验证：去掉 render ok 立刻红
+- **实测数据**（两遍一致）：网址路径 13 事件 / 报告 1062 字 4 节；音频路径 15 事件 / 报告 1552 字 5 节（多「语音画像」）
+- **文件**：`server/pipeline.py`、`web/index.html`、`server/test_ui_contract.py`、`.github/workflows/ci.yml`
 
 ## 待办
 
