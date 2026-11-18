@@ -28,6 +28,10 @@ jobs:
       - name: safe_eval（35 项）
         run: python server/test_safe_eval.py
 
+      # ── HTTP 层：真起服务、打真请求；analyze 用假 pipeline，不花钱 ──
+      - name: HTTP 层（路由 / 校验 / 限流 / SSE 收尾）
+        run: python server/test_app.py
+
       # ── 抓取层：patch 掉网络、真调 fetch()，覆盖 FETCH_BACKEND 三档与未设置 ──
       - name: 抓取层（公众号 / 通用网页 / 回退）
         run: python server/test_extract.py

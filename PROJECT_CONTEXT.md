@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.5**（2026-11-18）
+- 当前版本：**v2.6**（2026-11-18）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、10 套 CI 测试。
 
@@ -30,7 +30,7 @@
 | `server/net.py` | **唯一出站口**：统一 CA、超时、两次重试、异常翻译 |
 | `server/doctor.py` | 环境体检：Python、certifi、代理变量、对上游的 TLS 握手 |
 | `server/llm.py` | OpenAI 兼容客户端 |
-| `server/test_*.py` | 13 套测试，见下文「测试」 |
+| `server/test_*.py` | 14 套测试，见下文「测试」 |
 | `web/index.html` | 单页前端（无外部依赖）：Markdown 渲染、窄屏表格转卡片、原文⇄可读版切换 |
 | `skills/article-deep-reading/` | 读解 SOP：`SKILL.md` + `references/checklists.md` + `scripts/`（`extract_wx.py` / `make_appendix.py` / `selfcheck_md.py`） |
 | `skills/math-doc-rigor/` | 数学文档严谨化：六查渲染体检 + 三层标注 + md→PDF 保真流水线 |
@@ -180,7 +180,7 @@ python3 server/doctor.py
 1. `python server/test_replay_v10.py --assert` —— 6 组历史误判回放，v1.0–v1.6 出过的错不许回来
 2. `python server/test_audit.py` —— 空表 / 假算 / 三态判定回归
 3. `python server/test_safe_eval.py` —— 求值器 35 项，绕过即阻断
-4. 推上去看 CI 全绿（13 套一次跑完）
+4. 推上去看 CI 全绿（14 套一次跑完）
 
 改抓取层（`extract.py` 的 `fetch()` 或其分支）后，**必须**跑 `python server/test_extract.py`：
 它是唯一真正调用 `fetch()` 的测试，v2.4 那个「忘 `import os` 导致三条抓取路一起崩」的 bug 就是靠它兜住的。
@@ -189,11 +189,12 @@ python3 server/doctor.py
 
 ## 测试
 
-CI 跑 13 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳过）：
+CI 跑 14 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳过）：
 
 | 测试 | 覆盖 |
 |---|---|
 | `test_safe_eval.py` | 求值器 35 项：12 正确 + 18 攻击 + 5 失败 |
+| `test_app.py` | HTTP 层 24 项：真起服务打真请求 —— 路由、health 不泄 key、analyze 八条校验、SSE 形状与临时件清理、上传六种情形、限流窗口 |
 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
 | `test_asr_backend.py` | ASR 适配层 29 项：四档后端判定、`describe` / `audio_spec` / `_api_root`、413·429·5xx·非 JSON·连接异常、`verbose_json` 降级重试、本地 whisper 三种失败、分片偏移三档回退 |
 | `test_doctor.py` | 体检脚本 13 项：代理脱敏、`INSECURE_TLS` 告警、certifi 缺失文案、TLS 三结局、无网跑完返回 0 |
@@ -323,6 +324,16 @@ CI 跑 13 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **反向验证**：把兜底改回原写法，`test_doctor` 立刻变红（1 error），恢复后全绿
 - **测出来的坑**：`call_args_list` 记录的是 `data` 字典引用，重试里 `pop()` 会改掉先前那条记录 —— 断言两次请求差异必须在假 post 内部当场快照
 - **文件**：`server/test_asr_backend.py`、`server/test_doctor.py`、`server/doctor.py`、`.github/workflows/ci.yml`
+
+### 15. HTTP 层补测（v2.6）
+
+- **根因**：`app.py` 一条测试都没有，而它是最外面那层门 —— 路由、上传校验、正文上限、限流、SSE 收尾全靠手工点
+- **做法**：绑定 `127.0.0.1:0` 起真 `ThreadingHTTPServer`，用 `http.client` 打真请求；`/api/analyze` 成功路径用假 `pipeline.analyze`，只验 SSE 形状与收尾
+- **覆盖 24 项**：GET 四项（含 health 九字段且不泄露 key）、analyze 八条校验、SSE 四项（含临时上传件用完即删）、upload 六项（含文件名穿越净化）、限流窗口越过一小时
+- **发现的文案偏差**（未改行为）：正文上限写「20 万字符」，但请求体另有 26 万字节闸；中文 20 万字符 = 60 万字节，先撞后者，**实际可粘贴约 8.6 万汉字**。已加成用例 `test_chinese_hits_body_limit_first` 钉住边界
+- **发现的时序假设**：临时上传件的删除断言约 5% 概率失败 —— 客户端读到 SSE 结束标记时，服务端 `finally` 里的 `unlink` 可能还没执行。改为轮询等待（`wait_until`），连跑 20 次全过。**「SSE 结束」不等于「临时文件已清」**
+- **反向验证**：临时关掉扩展名白名单，`test_rejects_bad_extension` 立刻变红（`200 != 400`），恢复后全绿
+- **文件**：`server/test_app.py`、`.github/workflows/ci.yml`
 
 ## 待办
 
