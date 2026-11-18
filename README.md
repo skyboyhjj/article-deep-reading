@@ -294,6 +294,7 @@ export SEARCH_ENABLED=auto   # auto 表示有 key 就启用；off 可关掉
 
 ```
 article-deep-reading/
+├── PROJECT_CONTEXT.md          ← 项目上下文（关键文件 / 部署 / 判定规则 / 已完成与待办）
 ├── skills/                     ← 可单独给支持 Skills 的平台用
 │   ├── article-deep-reading/   ← 读解 SOP（7 步 + 病灶库 + 检查器）
 │   └── math-doc-rigor/         ← 数学文档严谨化（6 查 + 渲染规则）
@@ -399,6 +400,17 @@ $env:INSECURE_TLS="1"
 - **API key 只在服务端**。前端永不接触；`/api/health` 只返回「是否已配置」。
 - **限流在内存里**，够单机用。公开部署请换 Redis 并加 IP 维度之外的策略（否则换 IP 即可绕过）。
 - 未经授权大量抓取第三方站点可能违反其条款，请自行评估。
+
+---
+
+## 相关文档
+
+| 文档 | 内容 |
+|---|---|
+| [PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md) | 项目上下文：关键文件、运行部署、判定规则、已完成与待办 |
+| [docs/SOP.md](./docs/SOP.md) | 读解方法本体：七步流程、病灶库、实战档案 |
+| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | 架构决策与失败模式：每个决策后跟一句「不这么做会怎样」 |
+| [CHANGELOG.md](./CHANGELOG.md) | 变更记录，只记使用者能感觉到的改动 |
 
 ---
 
