@@ -294,6 +294,7 @@ export SEARCH_ENABLED=auto   # auto 表示有 key 就启用；off 可关掉
 
 ```
 article-deep-reading/
+├── AGENTS.md                   ← AI 助手指南（预读规则 / 自检清单 / 已知偏差案例）
 ├── PROJECT_CONTEXT.md          ← 项目上下文（关键文件 / 部署 / 判定规则 / 已完成与待办）
 ├── skills/                     ← 可单独给支持 Skills 的平台用
 │   ├── article-deep-reading/   ← 读解 SOP（7 步 + 病灶库 + 检查器）
@@ -407,6 +408,7 @@ $env:INSECURE_TLS="1"
 
 | 文档 | 内容 |
 |---|---|
+| [AGENTS.md](./AGENTS.md) | AI 助手指南：改动前必读哪份、实现后自检哪些、哪些偏差已经犯过 |
 | [PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md) | 项目上下文：关键文件、运行部署、判定规则、已完成与待办 |
 | [docs/SOP.md](./docs/SOP.md) | 读解方法本体：七步流程、病灶库、实战档案 |
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | 架构决策与失败模式：每个决策后跟一句「不这么做会怎样」 |

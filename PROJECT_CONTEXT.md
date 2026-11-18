@@ -18,6 +18,7 @@
 
 | 文件 | 用途 |
 |------|------|
+| `AGENTS.md` | AI 助手指南：预读规则、实现后自检清单、已知偏差案例、技术约定 —— **动手改之前先读它** |
 | `server/app.py` | HTTP 路由 + SSE 流式进度 + 上传 / 限流；命令行 `-p` / `--host` 优先于环境变量 |
 | `server/pipeline.py` | 阶段编排、判定闸、报告模板（最大文件，约 72 KB） |
 | `server/safe_eval.py` | 白名单 AST 求值器 —— **安全命门，任何绕过都是阻断级问题** |
@@ -319,6 +320,7 @@ CI 跑 10 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 
 | 任务类型 | 先读 |
 |---|---|
+| 任何代码改动 | `AGENTS.md`（预读规则 + 自检清单 + 已知偏差） |
 | 改方法 / 改提示词 / 写读解 | `docs/SOP.md`（七步 + 病灶库） |
 | 改架构 / 改判定 / 调成本 | `docs/ARCHITECTURE.md`（决策与失败模式） |
 | 在平台内用读解能力 | `skills/article-deep-reading/SKILL.md` |
