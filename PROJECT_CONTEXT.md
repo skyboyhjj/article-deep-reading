@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.13**（2026-11-18）
+- 当前版本：**v2.14**（2026-11-18）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、10 套 CI 测试。
 
@@ -31,6 +31,7 @@
 | `server/doctor.py` | 环境体检：Python、certifi、代理变量、对上游的 TLS 握手 |
 | `server/llm.py` | OpenAI 兼容客户端 |
 | `server/test_*.py` | 16 套测试，见下文「测试」 |
+| `tools/e2e_switch_check.py` | 端到端检查：起假模型 + 假页面 + 真服务，验「网址 ↔ 上传音视频」切换后的报告头（A/B/C 三组 14 项断言） |
 | `web/index.html` | 单页前端（无外部依赖）：Markdown 渲染、窄屏表格转卡片、原文⇄可读版切换 |
 | `skills/article-deep-reading/` | 读解 SOP：`SKILL.md` + `references/checklists.md` + `scripts/`（`extract_wx.py` / `make_appendix.py` / `selfcheck_md.py`） |
 | `skills/math-doc-rigor/` | 数学文档严谨化：六查渲染体检 + 三层标注 + md→PDF 保真流水线 |
@@ -396,6 +397,16 @@ CI 跑 16 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **不采纳**「上传时清空 URL」：会废掉「文章 + 视频对照」这条有意设计（视频号的「元宝总结 vs 原声」依赖它）
 - **回归**：`test_pipeline_e2e` 5 项 → 8 项，两项反向验证均变红
 - **文件**：`server/pipeline.py`、`web/index.html`、`server/test_pipeline_e2e.py`
+
+### 23. 端到端切换检查入库（v2.14）
+
+- **起因**：v2.13 的 bug 是先由人工实测发现的，仓库里没有任何自动化能复现它；复现脚本当时放在 `/tmp`，被沙箱清空
+- **实现**：`tools/e2e_switch_check.py` —— 现场生成 WAV、起假模型端点（chat + ASR + 假公众号页）、起真 app，跑 A（只网址）/ B（只上传件）/ C（两者同时）三组，默认 2 轮，共 14 项断言
+- **为何能守门**：C 组断言报告头必须有「来源构成」行；A 组断言纯链接时**不**出现该行（避免噪音）；B 组断言内部枚举名 `video_upload` 不外泄
+- **自带自检**：统计假模型的调用分布，若「第一步/第二步/第三步/第四步」一个都没命中，说明提示词的分步标记改了、脚本要跟着更新
+- **反向验证**：把「正文来自上传音视频的转录」改掉，C2 两轮都红
+- **已接入 CI**，`--rounds 2`，退出码 0/1/2（通过 / 断言失败 / 环境不满足）
+- **文件**：`tools/e2e_switch_check.py`、`.github/workflows/ci.yml`
 
 ## 待办
 

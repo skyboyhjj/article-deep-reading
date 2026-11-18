@@ -340,6 +340,7 @@ article-deep-reading/
 │   ├── asr.py                  ← 转录适配层（OpenAI 兼容 / 本地 whisper）
 │   ├── media.py                ← ffmpeg 抽音轨、探时长、超长切片
 │   └── llm.py                  ← OpenAI 兼容客户端
+├── tools/                      ← 开发期检查脚本（输入切换端到端，不联网不花钱）
 ├── web/index.html              ← 单页前端（无外部依赖）
 ├── examples/                   ← 两份完整范例：读解 + 算据附录 + 可独立跑的脚本
 └── docs/

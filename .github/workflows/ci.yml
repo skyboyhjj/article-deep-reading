@@ -32,6 +32,10 @@ jobs:
       - name: HTTP 层（路由 / 校验 / 限流 / SSE 收尾）
         run: python server/test_app.py
 
+      # ── 端到端：真起服务 + 假模型 + 假页面，验「网址 ↔ 上传音视频」切换后的报告头 ──
+      - name: 输入切换端到端
+        run: python tools/e2e_switch_check.py --rounds 2
+
       # ── 前后端契约：服务端发的 stage/status，前端必须都认识 ──
       - name: 前后端契约（标签集合 / 结束态 / done.md）
         run: python server/test_ui_contract.py
