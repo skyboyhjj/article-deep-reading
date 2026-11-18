@@ -467,6 +467,7 @@ function handleEvent(chunk){
     uploadId = "";
     $("file").value = "";
     $("fileLabel").classList.remove("done");
+    $("url").value = "";   // 一次读解用完即清：留着下次上传视频时会把旧链接一起提交，报告头被污染
   }
 }
 

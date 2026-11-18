@@ -50,6 +50,39 @@ def install_fakes():
     pipeline.llm = llm
 
 
+def _report_header_checks() -> list[tuple[str, bool]]:
+    """v2.13：混合来源必须显式；内部枚举名不许出现在报告里。
+
+    起因：URL 框留着旧链接 + 上传视频时，报告头是文章标题/作者/时间，
+    正文却是视频转录，读起来像「杂交体」。这种组合本身是支持的
+    （视频号场景靠它做「元宝总结 vs 原声」），缺的是一行说明。
+    """
+    base = {
+        "title": "测试标题", "authors": ["某号"], "published": "2026-11-13 17:48",
+        "n_chars": 500, "text": "正文" * 100, "notes": [], "kind": "wechat",
+    }
+    url = "https://mp.weixin.qq.com/s/x"
+    empty_calc = {"items": []}      # 这一组只看报告头部，实算节不需要
+
+    mixed = dict(base, transcript="转录文本", layer="L0 原声转录")
+    md_mixed = pipeline.render_report(url, mixed, TRIAGE, VERIFY, empty_calc, "评述")
+
+    md_plain = pipeline.render_report(url, base, TRIAGE, VERIFY, empty_calc, "评述")
+
+    upload = {
+        "title": "v.mp4", "authors": [], "published": "", "n_chars": 300,
+        "text": "转录" * 100, "notes": [], "kind": "video_upload", "transcript": "转录",
+    }
+    md_upload = pipeline.render_report("", upload, TRIAGE, VERIFY, empty_calc, "评述")
+
+    return [
+        ("混合来源标注了构成", "来源构成" in md_mixed
+         and "正文来自上传音视频的转录" in md_mixed),
+        ("纯链接不标注构成（避免噪音）", "来源构成" not in md_plain),
+        ("内部枚举名不外泄", "上传的音视频" in md_upload and "video_upload" not in md_upload),
+    ]
+
+
 def main() -> int:
     install_fakes()
     body = "某文声称效率提升一百倍，并称这是已证明的定理。" * 20
@@ -80,6 +113,7 @@ def main() -> int:
         ("评述段落存在", "把估算标成了估算" in md),
         ("免责声明存在", "不能替代读者本人对原始出处的核对" in md),
     ]
+    checks += _report_header_checks()
     for name, ok in checks:
         print(("[ok] " if ok else "[FAIL] ") + name)
         if not ok:

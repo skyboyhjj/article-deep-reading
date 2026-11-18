@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.12**（2026-11-18）
+- 当前版本：**v2.13**（2026-11-18）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、10 套 CI 测试。
 
@@ -200,7 +200,7 @@ CI 跑 16 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 | `test_media.py` | 媒体层 34 项：假 ffmpeg 覆盖全部失败分支与命令形状（无 ffmpeg、切片失败、时长 `N/A`、产出过小），真 ffmpeg 用例另设 skip |
 | `test_asr_backend.py` | ASR 适配层 29 项：四档后端判定、`describe` / `audio_spec` / `_api_root`、413·429·5xx·非 JSON·连接异常、`verbose_json` 降级重试、本地 whisper 三种失败、分片偏移三档回退 |
 | `test_doctor.py` | 体检脚本 13 项：代理脱敏、`INSECURE_TLS` 告警、certifi 缺失文案、TLS 三结局、无网跑完返回 0 |
-| `test_pipeline_e2e.py` | 五阶段数据流，假模型替身 |
+| `test_pipeline_e2e.py` | 五阶段数据流（假模型替身）+ 报告头三查：混合来源标注、纯链接不标注、枚举名不外泄，8 项 |
 | `test_video.py` | 视频号路径与 L1 二手标注 |
 | `test_asr.py` | 转录链路（切片、偏移合并、事后校对） |
 | `test_audit.py` | 自产报告审计：空表、假算、三态判定 |
@@ -387,6 +387,15 @@ CI 跑 16 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **新增**：`server/test_ui_contract.py`（7 项）—— stage 集合双向核对、LABEL 一致、每阶段必须有结束态、done 必带 md。反向验证：去掉 render ok 立刻红
 - **实测数据**（两遍一致）：网址路径 13 事件 / 报告 1062 字 4 节；音频路径 15 事件 / 报告 1552 字 5 节（多「语音画像」）
 - **文件**：`server/pipeline.py`、`web/index.html`、`server/test_ui_contract.py`、`.github/workflows/ci.yml`
+
+### 22. 修「URL 残留导致报告杂交」（v2.13）
+
+- **来源**：TRAE 按用户要求手动测两轮「URL ↔ 视频」切换，发现报告头被上次文章污染；我独立复现，两轮 `diff` 为空
+- **根因**：前端 `run()` 同时提交 `url` 与 `upload_id`、`done` 不清 URL；后端 `if has_media and not url` 与 docstring 声明的优先级不一致
+- **修复三层**：`done` 清 URL（消除残留）、混合模式加「来源构成」行（让组合显式）、`KIND` 补 `video_upload` 映射（内部枚举名不外泄）
+- **不采纳**「上传时清空 URL」：会废掉「文章 + 视频对照」这条有意设计（视频号的「元宝总结 vs 原声」依赖它）
+- **回归**：`test_pipeline_e2e` 5 项 → 8 项，两项反向验证均变红
+- **文件**：`server/pipeline.py`、`web/index.html`、`server/test_pipeline_e2e.py`
 
 ## 待办
 

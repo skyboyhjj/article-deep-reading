@@ -948,6 +948,7 @@ def render_report(url: str, doc: dict, triage: dict, verify: dict, calc: dict, c
         "arxiv": "arXiv 论文",
         "generic": "网页",
         "pasted": "粘贴正文",
+        "video_upload": "上传的音视频",
     }
     L: list[str] = []
     L.append(f"# 读解：{doc['title'] or url}\n")
@@ -958,6 +959,11 @@ def render_report(url: str, doc: dict, triage: dict, verify: dict, calc: dict, c
     )
     if doc.get("layer"):
         L.append(f"- 来源层级：{doc['layer']}")
+    if doc.get("transcript") and url:
+        # 元信息来自链接、正文来自上传的音视频 —— 这种组合是支持的（视频号场景就靠它做
+        # 「元宝总结 vs 原声」），但必须写出来；否则报告头是文章标题、正文是转录，
+        # 读起来像两个来源混在一起（v2.13）。
+        L.append("- 来源构成：标题 / 作者 / 发布时间来自上述链接；正文来自上传音视频的转录")
     if doc["authors"]:
         L.append(
             f"- 作者（按页面顺序）：{'、'.join(doc['authors'][:12])}"
