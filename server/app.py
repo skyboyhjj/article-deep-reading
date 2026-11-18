@@ -13,12 +13,12 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import socket
 import tempfile
 import threading
-import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -28,6 +28,7 @@ import asr
 import llm
 import media
 import pipeline
+import ratelimit
 import search
 
 HERE = Path(__file__).resolve().parent
@@ -35,6 +36,28 @@ WEB = HERE.parent / "web"
 
 # 极简限流：每 IP 每小时 N 次（防滥用；真实场景请换 Redis + 更细策略）
 RATE_LIMIT = int(os.environ.get("RATE_LIMIT_PER_HOUR", "10"))
+
+
+def _parse_trusted(raw: str) -> tuple[frozenset[str], tuple]:
+    """解析 TRUSTED_PROXIES：支持逗号分隔的 IP 与 CIDR 网段。
+
+    支持网段是必要的 —— Docker 容器重建后内网 IP 会变，
+    只写单个 IP 的话，一次重启就悄悄失效（退化成「全站共享额度」）。
+    """
+    exact: set[str] = set()
+    nets: list = []
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "/" in part:
+            try:
+                nets.append(ipaddress.ip_network(part, strict=False))
+            except ValueError:
+                pass
+        else:
+            exact.add(part)
+    return frozenset(exact), tuple(nets)
 
 # /api/analyze 的请求体上限（字节）。中文一字 3 字节，故约 8.6 万汉字。
 BODY_LIMIT = 260_000
@@ -47,8 +70,15 @@ ALLOWED_EXT = {".mp4", ".mov", ".m4v", ".m4a", ".mp3", ".wav", ".aac",
                ".flac", ".webm", ".mkv", ".ogg", ".amr", ".opus", ".silk"}
 MAX_UPLOAD = int(os.environ.get("MAX_UPLOAD_MB", "300")) * 1024 * 1024
 CHUNK = 256 * 1024
-_rate: dict[str, list[float]] = {}
-_rate_lock = threading.Lock()
+
+# 限流：内存（单机/开发）或 Redis（多副本部署），由 REDIS_URL 决定。
+# 注意「没配 Redis」是模式，「Redis 连不上」是故障 —— 后者 fail closed 回 503。
+LIMITER = ratelimit.build_limiter(RATE_LIMIT)
+
+# 反代后取真实 IP：只有直连 peer 落在可信代理名单里，才采纳 X-Real-IP。
+# 默认**不信任任何头** —— 宁可漏配导致「全站共享额度」（功能故障，立刻看得见），
+# 也不要默认全信导致「谁都能伪造头绕过限流」（安全漏洞，没人会察觉）。
+_TRUST_EXACT, _TRUST_NETS = _parse_trusted(os.environ.get("TRUSTED_PROXIES", ""))
 
 # 同时进行的任务上限。一次读解要跑 1–2 分钟，ThreadingHTTPServer 默认线程无上限，
 # 高峰期会把整机拖垮（见 docs/ARCHITECTURE.md §三末）。
@@ -59,16 +89,16 @@ SLOT_WAIT = float(os.environ.get("SLOT_WAIT_SEC", "20"))
 _slots = threading.BoundedSemaphore(MAX_CONCURRENT)
 
 
-def _allow(ip: str) -> tuple[bool, int]:
-    now = time.time()
-    with _rate_lock:
-        hits = [t for t in _rate.get(ip, []) if now - t < 3600]
-        if len(hits) >= RATE_LIMIT:
-            _rate[ip] = hits
-            return False, 0
-        hits.append(now)
-        _rate[ip] = hits
-        return True, RATE_LIMIT - len(hits)
+def _peer_trusted(peer: str) -> bool:
+    if peer in _TRUST_EXACT:
+        return True
+    if not _TRUST_NETS:
+        return False
+    try:
+        addr = ipaddress.ip_address(peer)
+    except ValueError:
+        return False
+    return any(addr in net for net in _TRUST_NETS)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -108,6 +138,25 @@ class Handler(BaseHTTPRequestHandler):
     def _sse_close(self) -> None:
         self.wfile.write(b"0\r\n\r\n")
         self.wfile.flush()
+
+    # ---------- 客户端 IP ----------
+    def _client_ip(self) -> str:
+        """取真实客户端 IP。
+
+        反代后 `client_address` 是 nginx 容器的内网 IP；不改这一行，
+        限流会把全站算成同一个人（第一个访客用满额度，所有人 429）。
+        只在直连 peer 属于可信代理时才采信 X-Real-IP。
+        """
+        peer = self.client_address[0]
+        if not (_TRUST_EXACT or _TRUST_NETS):
+            return peer                       # 未配置可信代理 = 不信任任何头
+        if not _peer_trusted(peer):
+            return peer
+        real = (self.headers.get("X-Real-IP") or "").strip()
+        if not real:
+            fwd = (self.headers.get("X-Forwarded-For") or "").split(",")
+            real = fwd[-1].strip() if fwd else ""   # 取最后一跳，第一跳可被客户端伪造
+        return real or peer
 
     # ---------- 并发额度 ----------
     def _acquire_slot(self) -> bool:
@@ -160,10 +209,12 @@ class Handler(BaseHTTPRequestHandler):
                                       f"可选：{', '.join(sorted(ALLOWED_EXT))}"})
             return
 
-        ip = self.client_address[0]
-        ok, left = _allow(ip)
+        ok, left, state = LIMITER.allow(self._client_ip())
         if not ok:
-            self._json(429, {"error": f"每小时限 {RATE_LIMIT} 次，请稍后再试"})
+            if state == "unavailable":
+                self._json(503, {"error": "限流服务暂不可用，请稍后再试"})
+            else:
+                self._json(429, {"error": f"每小时限 {RATE_LIMIT} 次，请稍后再试"})
             return
 
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -216,6 +267,7 @@ class Handler(BaseHTTPRequestHandler):
                 "ffmpeg": media.has_ffmpeg(),
                 "max_upload_mb": MAX_UPLOAD // 1024 // 1024,
                 "rate_limit_per_hour": RATE_LIMIT,
+                "rate_limit_backend": type(LIMITER).__name__,
                 "max_concurrent": MAX_CONCURRENT,
             })
             return
@@ -279,10 +331,12 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "粘贴正文过长（上限 20 万字符）"})
             return
 
-        ip = self.client_address[0]
-        ok, left = _allow(ip)
+        ok, left, state = LIMITER.allow(self._client_ip())
         if not ok:
-            self._json(429, {"error": f"每小时限 {RATE_LIMIT} 次，请稍后再试"})
+            if state == "unavailable":
+                self._json(503, {"error": "限流服务暂不可用，请稍后再试"})
+            else:
+                self._json(429, {"error": f"每小时限 {RATE_LIMIT} 次，请稍后再试"})
             return
 
         if not self._acquire_slot():

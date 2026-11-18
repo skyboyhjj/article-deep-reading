@@ -11,6 +11,7 @@
 `pipeline.analyze` 替换，只验 SSE 的形状与收尾。
 """
 import http.client
+import ipaddress
 import json
 import os
 import shutil
@@ -25,6 +26,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import app  # noqa: E402
+import ratelimit  # noqa: E402
 
 HOST = "127.0.0.1"
 PORT = 0
@@ -57,14 +59,16 @@ def request(method, path, body=None, headers=None):
         conn.close()
 
 
-def post_json(path, obj):
-    return request("POST", path, body=json.dumps(obj).encode(),
-                   headers={"Content-Type": "application/json"})
+def post_json(path, obj, extra=None):
+    body = json.dumps(obj).encode()
+    headers = {"Content-Type": "application/json", "Content-Length": str(len(body))}
+    headers.update(extra or {})
+    return request("POST", path, body=body, headers=headers)
 
 
 class Base(unittest.TestCase):
     def setUp(self):
-        app._rate.clear()
+        app.LIMITER.reset()
         # 每个用例一个独立的上传目录：共享系统 temp 时，
         # 上次运行残留的文件会让断言时对时错（踩过一次）。
         tmp = Path(tempfile.mkdtemp(prefix="apptest_"))
@@ -74,7 +78,7 @@ class Base(unittest.TestCase):
         self.addCleanup(shutil.rmtree, tmp, True)
 
     def tearDown(self):
-        app._rate.clear()
+        app.LIMITER.reset()
 
     def wait_until(self, cond, timeout=2.0, step=0.02):
         """SSE 的结束标记先于服务端收尾动作到达，断言不能建立在「读完即已清」上。"""
@@ -232,7 +236,7 @@ class TestAnalyzeStream(Base):
         self.assertIn("模型挂了", text)
 
     def test_rate_limit_blocks_second_call(self):
-        with mock.patch.object(app, "RATE_LIMIT", 1), \
+        with mock.patch.object(app, "LIMITER", ratelimit.MemoryRateLimiter(1)), \
                 mock.patch.object(app.pipeline, "analyze", self._fake({"stage": "done"})):
             first, _, _ = post_json("/api/analyze", {"url": "https://example.com/c"})
             second, _, body = post_json("/api/analyze", {"url": "https://example.com/c"})
@@ -303,7 +307,7 @@ class TestUpload(Base):
     def test_upload_rate_limited(self):
         blob = b"\0" * 16
         hdr = {"Content-Length": str(len(blob)), "X-Filename": "demo.mp4"}
-        with mock.patch.object(app, "RATE_LIMIT", 1):
+        with mock.patch.object(app, "LIMITER", ratelimit.MemoryRateLimiter(1)):
             first, _, _ = request("POST", "/api/upload", body=blob, headers=hdr)
             second, _, body = request("POST", "/api/upload", body=blob, headers=hdr)
         for f in app.UPLOAD_DIR.glob("*__demo.mp4"):
@@ -390,16 +394,91 @@ class TestConcurrency(Base):
         self.assertEqual(codes, [200, 200, 200])
 
 
+class TestClientIp(Base):
+    """反代后取真实 IP：只有 peer 可信才采信 X-Real-IP。
+
+    不测这一层的后果（v2.16 之前）：部署到 nginx 后面，全站被算成同一个 IP，
+    第一个访客用满额度，所有人 429；而 nginx 那层日志里 IP 是对的，极难排查。
+    """
+
+    def setUp(self):
+        super().setUp()
+        # 这组只关心「谁被计数」，不关心读解过程：换成秒回的假 pipeline
+        patcher = mock.patch.object(app.pipeline, "analyze",
+                                    lambda *a, **k: iter([{"stage": "done", "status": "ok"}]))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _call(self, real_ip=None):
+        extra = {"X-Real-IP": real_ip} if real_ip else None
+        return post_json("/api/analyze", {"url": "https://example.com/a"}, extra)
+
+    def test_header_ignored_when_no_trusted_proxy(self):
+        """没配可信代理时，头一律不采信 —— 两个不同 IP 仍算同一个人。"""
+        with mock.patch.object(app, "LIMITER", ratelimit.MemoryRateLimiter(1)), \
+                mock.patch.object(app, "_TRUST_EXACT", frozenset()), \
+                mock.patch.object(app, "_TRUST_NETS", ()):
+            first, _, _ = self._call("9.9.9.1")
+            second, _, body = self._call("9.9.9.2")
+        self.assertEqual(first, 200)
+        self.assertEqual(second, 429)
+        self.assertIn("每小时限", json.loads(body)["error"])
+
+    def test_header_used_when_peer_trusted(self):
+        """peer 在名单里时，不同的 X-Real-IP 各算各的额度。"""
+        with mock.patch.object(app, "LIMITER", ratelimit.MemoryRateLimiter(1)), \
+                mock.patch.object(app, "_TRUST_EXACT", frozenset({"127.0.0.1"})), \
+                mock.patch.object(app, "_TRUST_NETS", ()):
+            first, _, _ = self._call("9.9.9.1")
+            second, _, _ = self._call("9.9.9.2")
+            third, _, body = self._call("9.9.9.1")
+        self.assertEqual((first, second), (200, 200))
+        self.assertEqual(third, 429)
+        self.assertIn("每小时限", json.loads(body)["error"])
+
+    def test_cidr_trust(self):
+        """按网段信任（容器重建后 IP 会变，只写单 IP 会悄悄失效）。"""
+        with mock.patch.object(app, "LIMITER", ratelimit.MemoryRateLimiter(1)), \
+                mock.patch.object(app, "_TRUST_EXACT", frozenset()), \
+                mock.patch.object(app, "_TRUST_NETS", (ipaddress.ip_network("127.0.0.0/8"),)):
+            first, _, _ = self._call("9.9.9.1")
+            second, _, _ = self._call("9.9.9.2")
+        self.assertEqual((first, second), (200, 200))
+
+    def test_peer_trusted_but_empty_header_falls_back(self):
+        """可信代理但没带头时，退回 peer，不能变成空字符串。"""
+        with mock.patch.object(app, "LIMITER", ratelimit.MemoryRateLimiter(1)), \
+                mock.patch.object(app, "_TRUST_EXACT", frozenset({"127.0.0.1"})), \
+                mock.patch.object(app, "_TRUST_NETS", ()):
+            first, _, _ = self._call(None)
+            second, _, _ = self._call(None)
+        self.assertEqual((first, second), (200, 429))
+
+    def test_limiter_unavailable_returns_503(self):
+        """Redis 不可用要回 503「服务暂不可用」，不能伪装成「你用超了」。"""
+
+        class Down:
+            limit = 4
+
+            def allow(self, ip):
+                return False, 0, "unavailable"
+
+        with mock.patch.object(app, "LIMITER", Down()):
+            status, _, body = self._call()
+        self.assertEqual(status, 503)
+        self.assertIn("限流服务暂不可用", json.loads(body)["error"])
+
+
 class TestRateWindow(Base):
     def test_window_expires(self):
         """一小时窗口外的记录不该继续占额度。"""
         fake_now = [1_000_000.0]
-        with mock.patch.object(app.time, "time", lambda: fake_now[0]), \
-                mock.patch.object(app, "RATE_LIMIT", 1):
-            self.assertTrue(app._allow("1.2.3.4")[0])
-            self.assertFalse(app._allow("1.2.3.4")[0])
+        lim = ratelimit.MemoryRateLimiter(1)
+        with mock.patch.object(ratelimit, "_now", lambda: fake_now[0]):
+            self.assertTrue(lim.allow("1.2.3.4")[0])
+            self.assertFalse(lim.allow("1.2.3.4")[0])
             fake_now[0] += 3601          # 越过一小时
-            self.assertTrue(app._allow("1.2.3.4")[0])
+            self.assertTrue(lim.allow("1.2.3.4")[0])
 
 
 if __name__ == "__main__":

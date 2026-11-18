@@ -80,6 +80,7 @@
 - **前端单文件**：`web/index.html`，不引 CDN、不引框架、无构建步骤。
 - **Python 3.12**，类型标注用 `str | None` 新写法。
 - **命令行优先于环境变量**：`-p` / `--host` 覆盖 `PORT` / `HOST`，别把这条改掉。
+- **限流键的取值比存储更要紧**：`self.client_address[0]` 在反代后面是 nginx 的 IP。加任何「按 IP」的逻辑前，先确认 `_client_ip()` 拿到了真实地址；`TRUSTED_PROXIES` 为空时它**不信任任何代理头**（漏配的后果是「全站共享额度」这种立刻看得见的故障，不是「谁都能伪造」这种看不见的漏洞）。
 - **新增耗时分支要先占额度**：`/api/*` 里任何「可能跑几十秒以上」的分支，开头必须 `self._acquire_slot()`，并把 `_slots.release()` 放进 `finally`。漏掉不是变慢，是**永久少一个槽**，而且只在并发时才显形（连续两次请求的用例就是为这个写的）。
 - **算据脚本的准入条件是「换台机器还能跑出同一个数」**，不是「当时跑通过」。三条硬线：① 不联网（外部服务当时的返回不可能复现）；② 随机必须固定种子；③ 路径必须相对脚本或可传参，写死 `/sandbox/...` 或 `C:\...` 的脚本在别人机器上第一条 `open()` 就崩。一次性的外部取证（抓某个接口、取某个分享链）不要包装成算据，改标「取证记录，不可复现」。
 - **提交信息用中文**，一句话说清改了什么。
@@ -90,26 +91,27 @@
 
 ## 五、CI/CD 与质量控制
 
-推 `main` 与 PR 触发 `.github/workflows/ci.yml`，16 套测试串跑，**全部不联网、不花钱**：
+推 `main` 与 PR 触发 `.github/workflows/ci.yml`，17 套测试串跑，**全部不联网、不花钱**：
 
 | 顺序 | 测试 | 覆盖 |
 |---|---|---|
 | 1 | `test_safe_eval.py` | 求值器 35 项：12 正确 + 18 攻击 + 5 失败 —— **绕过即阻断** |
 | 2 | `test_app.py` | HTTP 层 30 项：真起服务打真请求 —— 路由、health 不泄 key、analyze 八条校验、超限后同连接不被污染、SSE 形状与临时件清理、上传六种情形、限流窗口、并发额度（503 与归还） |
-| 3 | `test_ui_contract.py` | 前后端契约 7 项：stage 集合双向核对、LABEL 一致、每阶段必须有结束态、done 必带 md |
-| 4 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
-| 5 | `test_pipeline_e2e.py` | 五阶段数据流（假模型替身）+ 报告头三查：混合来源标注、纯链接不标注、枚举名不外泄，8 项 |
-| 6 | `test_video.py` | 视频号路径与 L1 二手标注 |
-| 7 | `test_media.py` | 媒体层 34 项：假 ffmpeg 覆盖全部失败分支与命令形状（无 ffmpeg、切片失败、时长 `N/A`、产出过小），真 ffmpeg 用例另设 skip |
-| 8 | `test_asr_backend.py` | ASR 适配层 29 项：四档后端判定、413·429·5xx·非 JSON·连接异常、`verbose_json` 降级重试、本地 whisper 三种失败、分片偏移三档回退 |
-| 9 | `test_asr.py` | 转录链路（切片、偏移合并、事后校对），缺 ffmpeg 自行跳过 |
-| 10 | `test_audit.py` | 自产报告审计：空表、假算、三态判定 |
-| 11 | `test_search.py` | 出处检索与权威判定 |
-| 12 | `test_json.py` | JSON 截断抢救与精简重试 |
-| 13 | `test_net.py` | TLS 出口：CA 优先级、重试、错误翻译 |
-| 14 | `test_doctor.py` | 体检脚本 13 项：代理脱敏、`INSECURE_TLS` 告警、certifi 缺失文案、TLS 三结局、无网跑完 |
-| 15 | `test_voice.py` | 语音画像：声学 + 文本双证据 |
-| 16 | `test_replay_v10.py --assert` | 6 组历史误判回放 —— **v1.0–v1.6 出过的错不许回来** |
+| 3 | `test_ratelimit.py` | 限流器 15 项：三态（ok/exceeded/unavailable）、TTL 只在首次设、故障即 unavailable、熔断与恢复、按 REDIS_URL 选实现 |
+| 4 | `test_ui_contract.py` | 前后端契约 7 项：stage 集合双向核对、LABEL 一致、每阶段必须有结束态、done 必带 md |
+| 5 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
+| 6 | `test_pipeline_e2e.py` | 五阶段数据流（假模型替身）+ 报告头三查：混合来源标注、纯链接不标注、枚举名不外泄，8 项 |
+| 7 | `test_video.py` | 视频号路径与 L1 二手标注 |
+| 8 | `test_media.py` | 媒体层 34 项：假 ffmpeg 覆盖全部失败分支与命令形状（无 ffmpeg、切片失败、时长 `N/A`、产出过小），真 ffmpeg 用例另设 skip |
+| 9 | `test_asr_backend.py` | ASR 适配层 29 项：四档后端判定、413·429·5xx·非 JSON·连接异常、`verbose_json` 降级重试、本地 whisper 三种失败、分片偏移三档回退 |
+| 10 | `test_asr.py` | 转录链路（切片、偏移合并、事后校对），缺 ffmpeg 自行跳过 |
+| 11 | `test_audit.py` | 自产报告审计：空表、假算、三态判定 |
+| 12 | `test_search.py` | 出处检索与权威判定 |
+| 13 | `test_json.py` | JSON 截断抢救与精简重试 |
+| 14 | `test_net.py` | TLS 出口：CA 优先级、重试、错误翻译 |
+| 15 | `test_doctor.py` | 体检脚本 13 项：代理脱敏、`INSECURE_TLS` 告警、certifi 缺失文案、TLS 三结局、无网跑完 |
+| 16 | `test_voice.py` | 语音画像：声学 + 文本双证据 |
+| 17 | `test_replay_v10.py --assert` | 6 组历史误判回放 —— **v1.0–v1.6 出过的错不许回来** |
 
 除 16 套 `server/test_*.py` 外，还有一支端到端检查 `tools/e2e_switch_check.py`：
 它起假模型 + 假页面 + 真服务，验「网址 ↔ 上传音视频」切换后的报告头（A/B/C 三组 14 项）。

@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.15**（2026-11-18）
+- 当前版本：**v2.16**（2026-11-18）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、10 套 CI 测试。
 
@@ -27,10 +27,11 @@
 | `server/media.py` | ffmpeg 抽音轨、探时长、超长切片 |
 | `server/search.py` | 未核项溯源（DeepSeek `/tools/search`）+ 域名白名单制权威判定 |
 | `server/voice.py` | 语音画像：声学侧 + 文本侧双证据 |
+| `server/ratelimit.py` | 限流器：内存/Redis 两实现，`allow()` 返回三态（ok/exceeded/unavailable），Redis 不可用 fail closed |
 | `server/net.py` | **唯一出站口**：统一 CA、超时、两次重试、异常翻译 |
 | `server/doctor.py` | 环境体检：Python、certifi、代理变量、对上游的 TLS 握手 |
 | `server/llm.py` | OpenAI 兼容客户端 |
-| `server/test_*.py` | 16 套测试，见下文「测试」 |
+| `server/test_*.py` | 17 套测试，见下文「测试」 |
 | `tools/e2e_switch_check.py` | 端到端检查：起假模型 + 假页面 + 真服务，验「网址 ↔ 上传音视频」切换后的报告头（A/B/C 三组 14 项断言） |
 | `web/index.html` | 单页前端（无外部依赖）：Markdown 渲染、窄屏表格转卡片、原文⇄可读版切换 |
 | `skills/article-deep-reading/` | 读解 SOP：`SKILL.md` + `references/checklists.md` + `scripts/`（`extract_wx.py` / `make_appendix.py` / `selfcheck_md.py`） |
@@ -182,7 +183,7 @@ python3 server/doctor.py
 1. `python server/test_replay_v10.py --assert` —— 6 组历史误判回放，v1.0–v1.6 出过的错不许回来
 2. `python server/test_audit.py` —— 空表 / 假算 / 三态判定回归
 3. `python server/test_safe_eval.py` —— 求值器 35 项，绕过即阻断
-4. 推上去看 CI 全绿（16 套一次跑完）
+4. 推上去看 CI 全绿（17 套一次跑完）
 
 改抓取层（`extract.py` 的 `fetch()` 或其分支）后，**必须**跑 `python server/test_extract.py`：
 它是唯一真正调用 `fetch()` 的测试，v2.4 那个「忘 `import os` 导致三条抓取路一起崩」的 bug 就是靠它兜住的。
@@ -191,12 +192,13 @@ python3 server/doctor.py
 
 ## 测试
 
-CI 跑 16 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳过；`test_media` 的分支层不依赖 ffmpeg，真实层才 skip）：
+CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳过；`test_media` 的分支层不依赖 ffmpeg，真实层才 skip）：
 
 | 测试 | 覆盖 |
 |---|---|
 | `test_safe_eval.py` | 求值器 35 项：12 正确 + 18 攻击 + 5 失败 |
-| `test_app.py` | HTTP 层 30 项：真起服务打真请求 —— 路由、health 不泄 key、analyze 八条校验、超限后同连接不被污染、SSE 形状与临时件清理、上传六种情形、限流窗口、并发额度（503 与归还） |
+| `test_ratelimit.py` | 限流器 15 项：三态、TTL 只在首次设、故障即 unavailable、熔断与恢复、按 URL 选实现 |
+| `test_app.py` | HTTP 层 35 项：真起服务打真请求 —— 路由、health 不泄 key、analyze 八条校验、超限后同连接不被污染、SSE 形状与临时件清理、上传六种情形、限流窗口、并发额度（503 与归还） |
 | `test_ui_contract.py` | 前后端契约 7 项：stage 集合互查、LABEL 一致、每阶段必须有结束态、done 必带 md |
 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
 | `test_media.py` | 媒体层 34 项：假 ffmpeg 覆盖全部失败分支与命令形状（无 ffmpeg、切片失败、时长 `N/A`、产出过小），真 ffmpeg 用例另设 skip |
@@ -416,6 +418,15 @@ CI 跑 16 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **数字经实测校准**：331 个断言点（不是估算）、16 套、`test_pipeline_e2e` 8 项、`test_replay_v10` 16 条断言
 - **验证状态**：TRAE 验证通过后入库
 - **文件**：`docs/TESTING.md`、`README.md`
+
+### 25. 限流换 Redis + 修反代后计数口径（v2.16）
+
+- **起因**：部署方案评审发现「反代后 `client_address` 是 nginx 的 IP」，只换存储不换取值等于全站共用一个计数
+- **实现**：`server/ratelimit.py` 两实现同接口、`allow()` 三态；`app.py` 加 `_client_ip()`（仅 peer 可信时采信 X-Real-IP，支持 CIDR）；429 与 503 分开
+- **三个取舍**：`TRUSTED_PROXIES` 空 = 不信任（宁可功能故障也不要静默漏洞）、三态而非布尔、故障后冷却 30 秒不再重试
+- **细节**：TTL 只在 `INCR` 返回 1 时设（每次 EXPIRE 会无限延后窗口）；`requirements` 加 redis 与 numpy
+- **测试**：新增 `test_ratelimit.py` 15 项；`test_app.py` 30 → 35 项；CI 16 → 17 套
+- **文件**：`server/ratelimit.py`、`server/app.py`、`server/test_ratelimit.py`、`server/test_app.py`、`requirements.txt`、`.env.example`、`README.md`、`docs/ARCHITECTURE.md`（决策 7）
 
 ## 待办
 

@@ -28,6 +28,10 @@ jobs:
       - name: safe_eval（35 项）
         run: python server/test_safe_eval.py
 
+      # ── 限流器：内存 / Redis 两种实现，Redis 挂掉必须 fail closed ──
+      - name: 限流器（三态 / fail closed / 熔断）
+        run: python server/test_ratelimit.py
+
       # ── HTTP 层：真起服务、打真请求；analyze 用假 pipeline，不花钱 ──
       - name: HTTP 层（路由 / 校验 / 限流 / SSE 收尾）
         run: python server/test_app.py
