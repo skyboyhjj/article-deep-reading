@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ffmpeg 给音频切片用例；缺了 test_asr 会自己跳过，不算失败
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          pip install numpy        # 语音画像的分析依赖（服务本身无此依赖，有降级）
+
+      # ── 安全命门：求值器的任何绕过都是阻断级问题 ──
+      - name: safe_eval（35 项）
+        run: python server/test_safe_eval.py
+
+      # ── 五阶段数据流：假模型替身，不联网不花钱 ──
+      - name: pipeline 端到端
+        run: python server/test_pipeline_e2e.py
+
+      - name: 视频号路径（L1 二手标注）
+        run: python server/test_video.py
+
+      - name: ASR 链路
+        run: python server/test_asr.py
+
+      # ── 自产报告审计回归：空表 / 假算 / 三态判定 ──
+      - name: 审计回归
+        run: python server/test_audit.py
+
+      - name: 出处检索与权威判定
+        run: python server/test_search.py
+
+      # ── 健壮性 ──
+      - name: JSON 截断抢救与重试
+        run: python server/test_json.py
+
+      - name: TLS 出口（CA 优先级 / 重试 / 错误翻译）
+        run: python server/test_net.py
+
+      - name: 语音画像
+        run: python server/test_voice.py
+
+      # ── 历史实况回放：v1.0–v1.6 出过的错，不能回来 ──
+      - name: 回放回归（6 组历史误判）
+        run: python server/test_replay_v10.py --assert

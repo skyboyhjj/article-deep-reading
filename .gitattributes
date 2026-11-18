@@ -1,0 +1,10 @@
+# 统一换行符：仓库内一律 LF，检出时按平台自动转换。
+# 不设这个，Windows 上编辑一次就会把整个文件标成已修改。
+* text=auto eol=lf
+
+# 明确二进制
+*.png binary
+*.jpg binary
+*.pdf binary
+*.zip binary
+*.gz binary
