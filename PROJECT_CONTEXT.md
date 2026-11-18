@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.14**（2026-11-18）
+- 当前版本：**v2.15**（2026-11-18）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、10 套 CI 测试。
 
@@ -36,6 +36,7 @@
 | `skills/article-deep-reading/` | 读解 SOP：`SKILL.md` + `references/checklists.md` + `scripts/`（`extract_wx.py` / `make_appendix.py` / `selfcheck_md.py`） |
 | `skills/math-doc-rigor/` | 数学文档严谨化：六查渲染体检 + 三层标注 + md→PDF 保真流水线 |
 | `docs/SOP.md` | 方法本体：七步流程、病灶库、实战档案、工程坑（340 行） |
+| `docs/TESTING.md` | 测试说明（给独立验证者）：16 套逐条、核对清单、三个反向实验、未覆盖边界 |
 | `docs/ARCHITECTURE.md` | 架构决策与失败模式：每个决策后跟一句「不这么做会怎样」（244 行） |
 | `examples/` | 两份完整范例（SwarmEvolve、群作用与计数）：读解正文 + 算据附录 + 可独立跑的脚本 |
 | `CHANGELOG.md` | 只记影响使用者的改动；对外发布自 v2.3 起算 |
@@ -407,6 +408,14 @@ CI 跑 16 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **反向验证**：把「正文来自上传音视频的转录」改掉，C2 两轮都红
 - **已接入 CI**，`--rounds 2`，退出码 0/1/2（通过 / 断言失败 / 环境不满足）
 - **文件**：`tools/e2e_switch_check.py`、`.github/workflows/ci.yml`
+
+### 24. 测试说明文档入库（v2.15）
+
+- **起因**：用户要把测试交给另一位验证者（TRAE）独立跑一遍，需要一份自包含的操作手册
+- **内容**：12 节 —— 环境要求、两种跑法（bash / PowerShell）、16 套逐条（项数 + 测什么 + 期望末行）、两个易误判点（skip 不等于失败、unittest 写 stderr）、逐条核对清单、三个反向实验、未覆盖边界、常见问题、迭代史、回报格式、端到端工具用法
+- **数字经实测校准**：331 个断言点（不是估算）、16 套、`test_pipeline_e2e` 8 项、`test_replay_v10` 16 条断言
+- **验证状态**：TRAE 验证通过后入库
+- **文件**：`docs/TESTING.md`、`README.md`
 
 ## 待办
 

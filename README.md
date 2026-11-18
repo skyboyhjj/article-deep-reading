@@ -448,6 +448,7 @@ $env:INSECURE_TLS="1"
 | [PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md) | 项目上下文：关键文件、运行部署、判定规则、已完成与待办 |
 | [docs/SOP.md](./docs/SOP.md) | 读解方法本体：七步流程、病灶库、实战档案 |
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | 架构决策与失败模式：每个决策后跟一句「不这么做会怎样」 |
+| [docs/TESTING.md](./docs/TESTING.md) | 测试说明：16 套测试逐条、核对清单、三个反向实验 |
 | [CHANGELOG.md](./CHANGELOG.md) | 变更记录，只记使用者能感觉到的改动 |
 
 ---
