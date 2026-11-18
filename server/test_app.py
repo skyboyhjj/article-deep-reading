@@ -107,7 +107,7 @@ class TestGet(Base):
         self.assertEqual(status, 200)
         data = json.loads(body)
         for key in ("ok", "llm", "asr", "asr_backend", "search", "search_backend",
-                    "ffmpeg", "max_upload_mb", "rate_limit_per_hour"):
+                    "ffmpeg", "max_upload_mb", "rate_limit_per_hour", "max_concurrent"):
             self.assertIn(key, data)
         self.assertNotIn(b"sk-should-never-appear", body)
 
@@ -325,6 +325,69 @@ class TestUpload(Base):
         for f in app.UPLOAD_DIR.glob("*.mp4"):
             if "evil" in f.name:
                 f.unlink(missing_ok=True)
+
+
+class TestConcurrency(Base):
+    """并发额度：满了给 503，不排队；成功与失败都要把额度还回来。"""
+
+    def test_busy_analyze_returns_503(self):
+        with mock.patch.object(app, "_slots", threading.Semaphore(0)), \
+                mock.patch.object(app, "SLOT_WAIT", 0.05):
+            status, _, body = post_json("/api/analyze", {"url": "https://example.com/a"})
+        self.assertEqual(status, 503)
+        self.assertIn("同时进行的任务已达", json.loads(body)["error"])
+
+    def test_busy_upload_returns_503(self):
+        blob = b"\0" * 16
+        with mock.patch.object(app, "_slots", threading.Semaphore(0)), \
+                mock.patch.object(app, "SLOT_WAIT", 0.05):
+            status, _, body = request("POST", "/api/upload", body=blob,
+                                      headers={"Content-Length": str(len(blob)),
+                                               "X-Filename": "a.mp4"})
+        self.assertEqual(status, 503)
+        self.assertIn("同时进行的任务已达", json.loads(body)["error"])
+
+    def test_slot_released_after_success(self):
+        """额度只有 1：第一个没还回来，第二个就会 503。"""
+        done = lambda *a, **k: iter([{"stage": "done"}])   # noqa: E731
+        with mock.patch.object(app, "_slots", threading.BoundedSemaphore(1)), \
+                mock.patch.object(app, "MAX_CONCURRENT", 1), \
+                mock.patch.object(app, "SLOT_WAIT", 0.1), \
+                mock.patch.object(app.pipeline, "analyze", done):
+            first, _, _ = post_json("/api/analyze", {"url": "https://example.com/a"})
+            second, _, _ = post_json("/api/analyze", {"url": "https://example.com/a"})
+        self.assertEqual((first, second), (200, 200))
+
+    def test_slot_released_after_pipeline_error(self):
+        """异常路径也必须还额度，否则一次失败就永久少一个槽。"""
+        def boom(*a, **k):
+            raise RuntimeError("x")
+            yield  # noqa: unreachable
+
+        done = lambda *a, **k: iter([{"stage": "done"}])   # noqa: E731
+        with mock.patch.object(app, "_slots", threading.BoundedSemaphore(1)), \
+                mock.patch.object(app, "MAX_CONCURRENT", 1), \
+                mock.patch.object(app, "SLOT_WAIT", 0.1):
+            with mock.patch.object(app.pipeline, "analyze", boom):
+                first, _, _ = post_json("/api/analyze", {"url": "https://example.com/a"})
+            with mock.patch.object(app.pipeline, "analyze", done):
+                second, _, _ = post_json("/api/analyze", {"url": "https://example.com/a"})
+        self.assertEqual((first, second), (200, 200))
+
+    def test_no_double_release(self):
+        """BoundedSemaphore 多 release 会抛 ValueError，这里让多余释放显形。
+
+        额度为 1 时连跑三次；若代码在两条路径上都 release，
+        第二次就会因超额释放把服务打成 500。
+        """
+        done = lambda *a, **k: iter([{"stage": "done"}])   # noqa: E731
+        with mock.patch.object(app, "_slots", threading.BoundedSemaphore(1)), \
+                mock.patch.object(app, "MAX_CONCURRENT", 1), \
+                mock.patch.object(app, "SLOT_WAIT", 0.1), \
+                mock.patch.object(app.pipeline, "analyze", done):
+            codes = [post_json("/api/analyze", {"url": "https://example.com/a"})[0]
+                     for _ in range(3)]
+        self.assertEqual(codes, [200, 200, 200])
 
 
 class TestRateWindow(Base):

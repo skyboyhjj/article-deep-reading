@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.8**（2026-11-18）
+- 当前版本：**v2.9**（2026-11-18）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、10 套 CI 测试。
 
@@ -194,7 +194,7 @@ CI 跑 15 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 | 测试 | 覆盖 |
 |---|---|
 | `test_safe_eval.py` | 求值器 35 项：12 正确 + 18 攻击 + 5 失败 |
-| `test_app.py` | HTTP 层 25 项：真起服务打真请求 —— 路由、health 不泄 key、analyze 八条校验、超限后同连接不被污染、SSE 形状与临时件清理、上传六种情形、限流窗口 |
+| `test_app.py` | HTTP 层 30 项：真起服务打真请求 —— 路由、health 不泄 key、analyze 八条校验、超限后同连接不被污染、SSE 形状与临时件清理、上传六种情形、限流窗口、并发额度（503 与归还） |
 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
 | `test_media.py` | 媒体层 34 项：假 ffmpeg 覆盖全部失败分支与命令形状（无 ffmpeg、切片失败、时长 `N/A`、产出过小），真 ffmpeg 用例另设 skip |
 | `test_asr_backend.py` | ASR 适配层 29 项：四档后端判定、`describe` / `audio_spec` / `_api_root`、413·429·5xx·非 JSON·连接异常、`verbose_json` 降级重试、本地 whisper 三种失败、分片偏移三档回退 |
@@ -352,9 +352,18 @@ CI 跑 15 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **新增用例**：`test_oversize_does_not_poison_next_request` —— 同一连接先超限再正常请求，第二个必须仍 200；去掉 drain 立刻红
 - **文件**：`server/app.py`、`server/test_app.py`
 
+### 18. 并发额度闸（v2.9）
+
+- **根因**：`ThreadingHTTPServer` 线程无上限，一次读解跑 1–2 分钟，几个用户同时提交就能把线程堆起来（`docs/ARCHITECTURE.md` §三末标为「上线前必须改」）
+- **实现**：`Semaphore(MAX_CONCURRENT=8)` + `SLOT_WAIT=20`；`/api/analyze` 与 `/api/upload` 先占额度，等不到回 503 并主动断开；`/api/health` 不占额度并新增 `max_concurrent` 字段
+- **三个取舍**：不做无上限排队（否则线程卡在信号量上等于换地方堆）；用 `BoundedSemaphore`（漏配对当场抛错）；health 不占额度（忙时更需要能查到忙成什么样）
+- **反向验证**：删掉 analyze 的 release，三条用例同时变红
+- **未做**：换多进程服务器 —— 信号量只能挡「并发任务」，挡不住「并发连接」
+- **文件**：`server/app.py`、`server/test_app.py`、`.env.example`、`README.md`、`docs/ARCHITECTURE.md`
+
 ## 待办
 
-- **并发上限**：`ThreadingHTTPServer` 线程无上限 + 长任务 = 一次流量高峰拖垮整机。公开部署前换 gunicorn/uvicorn 或加信号量（`docs/ARCHITECTURE.md` §三末）
+- **换多进程服务器**：并发任务已由 `Semaphore(MAX_CONCURRENT=8)` 挡住（v2.9），但信号量挡不住「并发连接」本身 —— 单进程仍是单点，公开部署前换 gunicorn/uvicorn（`docs/ARCHITECTURE.md` §三末）
 - **公开演示站**：需 Redis 限流（内存计数换 IP 即绕）、调低 `RATE_LIMIT_PER_HOUR`、服务端兜底 key
 - **M2 任务队列 + 结果持久化**：让读解结果有可分享的链接（需一台有 Redis 的机器）
 - **M3 核验原语扩充**：给 `safe_eval` 加 `det2` / `trace` / `frobenius_norm` / `pow_sum` 等固定原语，模型只能填参数不能写代码（路线 A，不引沙箱）

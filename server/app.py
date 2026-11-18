@@ -50,6 +50,14 @@ CHUNK = 256 * 1024
 _rate: dict[str, list[float]] = {}
 _rate_lock = threading.Lock()
 
+# 同时进行的任务上限。一次读解要跑 1–2 分钟，ThreadingHTTPServer 默认线程无上限，
+# 高峰期会把整机拖垮（见 docs/ARCHITECTURE.md §三末）。
+MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT", "8"))
+# 等额度的秒数。等不到就 503 —— 不做无上限排队，否则空线程会堆满。
+SLOT_WAIT = float(os.environ.get("SLOT_WAIT_SEC", "20"))
+# 用 Bounded 版：release 多于 acquire 会立刻报错，能当场抓出漏配对的分支。
+_slots = threading.BoundedSemaphore(MAX_CONCURRENT)
+
 
 def _allow(ip: str) -> tuple[bool, int]:
     now = time.time()
@@ -100,6 +108,19 @@ class Handler(BaseHTTPRequestHandler):
     def _sse_close(self) -> None:
         self.wfile.write(b"0\r\n\r\n")
         self.wfile.flush()
+
+    # ---------- 并发额度 ----------
+    def _acquire_slot(self) -> bool:
+        """占一个并发额度。等不到就 503 并主动断开。
+
+        不无限等：ThreadingHTTPServer 每连接一线程，让它们卡在信号量上
+        等于把线程数问题换个地方堆着。断开让客户端尽早重试。
+        """
+        if _slots.acquire(timeout=SLOT_WAIT):
+            return True
+        self.close_connection = True
+        self._json(503, {"error": f"同时进行的任务已达 {MAX_CONCURRENT} 个，请稍后重试"})
+        return False
 
     # ---------- 上传 ----------
     def _drain(self, n: int) -> None:
@@ -195,13 +216,19 @@ class Handler(BaseHTTPRequestHandler):
                 "ffmpeg": media.has_ffmpeg(),
                 "max_upload_mb": MAX_UPLOAD // 1024 // 1024,
                 "rate_limit_per_hour": RATE_LIMIT,
+                "max_concurrent": MAX_CONCURRENT,
             })
             return
         self._json(404, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
         if self.path == "/api/upload":
-            self._handle_upload()
+            if not self._acquire_slot():
+                return
+            try:
+                self._handle_upload()
+            finally:
+                _slots.release()
             return
         if self.path != "/api/analyze":
             self._json(404, {"error": "not found"})
@@ -258,26 +285,31 @@ class Handler(BaseHTTPRequestHandler):
             self._json(429, {"error": f"每小时限 {RATE_LIMIT} 次，请稍后再试"})
             return
 
-        self._sse_open()
-        self._sse({"stage": "quota", "status": "ok", "text": f"本小时剩余 {left} 次"})
+        if not self._acquire_slot():
+            return
         try:
-            for ev in pipeline.analyze(url, pasted, ptitle, media_path, media_name):
-                self._sse(ev)
-        except BrokenPipeError:
-            return  # 客户端断开
-        except Exception as exc:  # noqa: BLE001
+            self._sse_open()
+            self._sse({"stage": "quota", "status": "ok", "text": f"本小时剩余 {left} 次"})
             try:
-                self._sse({"stage": "error", "status": "fail",
-                           "text": f"服务异常：{type(exc).__name__}: {exc}"})
-            except OSError:
-                return
+                for ev in pipeline.analyze(url, pasted, ptitle, media_path, media_name):
+                    self._sse(ev)
+            except BrokenPipeError:
+                return  # 客户端断开
+            except Exception as exc:  # noqa: BLE001
+                try:
+                    self._sse({"stage": "error", "status": "fail",
+                               "text": f"服务异常：{type(exc).__name__}: {exc}"})
+                except OSError:
+                    return
+            finally:
+                try:
+                    self._sse_close()
+                except OSError:
+                    pass
+                if media_path:
+                    Path(media_path).unlink(missing_ok=True)
         finally:
-            try:
-                self._sse_close()
-            except OSError:
-                pass
-            if media_path:
-                Path(media_path).unlink(missing_ok=True)
+            _slots.release()
 
 
 def _lan_ip() -> str:

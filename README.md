@@ -349,6 +349,8 @@ docker run -p 8000:8000 -e LLM_API_KEY=sk-... deep-read
 | `LLM_MODEL` | `deepseek-chat` | 模型名 |
 | `PORT` / `HOST` | `8000` / `0.0.0.0` | 监听；**命令行 `-p` / `--host` 优先于这两个变量** |
 | `RATE_LIMIT_PER_HOUR` | `10` | 每 IP 每小时次数（内存计数，重启归零） |
+| `MAX_CONCURRENT` | `8` | 同时进行的任务上限；满了回 503，不排队 |
+| `SLOT_WAIT_SEC` | `20` | 等额度的秒数，等不到即 503 |
 | `MAX_UPLOAD_MB` | `300` | 单个上传音视频上限 |
 | `ASR_BACKEND` | `auto` | `auto` / `openai` / `local` |
 | `ASR_BASE_URL` | `https://api.openai.com/v1` | OpenAI 兼容转录端点 |

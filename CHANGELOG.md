@@ -6,6 +6,38 @@
 
 ---
 
+## v2.9 · 2026-11-18
+
+**给并发加一道闸。** 此前 `ThreadingHTTPServer` 线程无上限：一次读解要跑 1–2 分钟，几个用户同时提交就能把线程堆起来，`docs/ARCHITECTURE.md` §三末把这条标成了「上线前必须改」。
+
+现在：
+
+```python
+MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT", "8"))
+SLOT_WAIT = float(os.environ.get("SLOT_WAIT_SEC", "20"))
+_slots = threading.BoundedSemaphore(MAX_CONCURRENT)
+```
+
+`/api/analyze` 与 `/api/upload` 都要先占额度；等 20 秒还占不到，就返回 **503**「同时进行的任务已达 N 个，请稍后重试」并主动断开连接。
+
+三个设计取舍：
+
+| 取舍 | 理由 |
+|---|---|
+| 不做无上限排队 | 线程会卡在信号量上，等于把线程数问题换个地方堆着；早断开让客户端早重试 |
+| 用 `BoundedSemaphore` 而非 `Semaphore` | 漏配对的分支会当场抛 `ValueError`，而不是悄悄把额度多还一次 |
+| `/api/health` 也占额度吗 —— 不占 | 服务忙的时候，人更需要能查到「忙成什么样」 |
+
+`/api/health` 新增 `max_concurrent` 字段，便于在线诊断。
+
+新增 5 项用例：额度满时 analyze 与 upload 都回 503、成功路径归还额度、**异常路径也归还额度**（否则一次失败就永久少一个槽）、连跑三次不会超额释放。
+
+反向验证：删掉 analyze 的 `_slots.release()`，三条用例同时变红；恢复后 30 项全过。
+
+**没做的部分**：换多进程服务器（gunicorn/uvicorn）。信号量只能挡住「并发任务」，挡不住「并发连接」本身 —— 单进程仍是单点。
+
+---
+
 ## v2.8 · 2026-11-18
 
 **把「20 万字符」这个不成立的数字改准，并顺手修了同一处的 keep-alive 问题。**
