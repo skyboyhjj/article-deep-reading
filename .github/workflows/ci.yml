@@ -43,6 +43,10 @@ jobs:
       - name: 视频号路径（L1 二手标注）
         run: python server/test_video.py
 
+      # ── 媒体层：假 ffmpeg 覆盖失败分支；真 ffmpeg 再跑一遍 ──
+      - name: 媒体层（无 ffmpeg / 切片失败 / 时长探不到）
+        run: python server/test_media.py
+
       # ── ASR 适配层：后端判定、错误映射、未配置与空转录（不需要 ffmpeg）──
       - name: ASR 适配层（四档判定 / 413·429·5xx / verbose_json 降级）
         run: python server/test_asr_backend.py

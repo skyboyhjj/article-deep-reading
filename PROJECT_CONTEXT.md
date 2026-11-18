@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.6**（2026-11-18）
+- 当前版本：**v2.7**（2026-11-18）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、10 套 CI 测试。
 
@@ -30,7 +30,7 @@
 | `server/net.py` | **唯一出站口**：统一 CA、超时、两次重试、异常翻译 |
 | `server/doctor.py` | 环境体检：Python、certifi、代理变量、对上游的 TLS 握手 |
 | `server/llm.py` | OpenAI 兼容客户端 |
-| `server/test_*.py` | 14 套测试，见下文「测试」 |
+| `server/test_*.py` | 15 套测试，见下文「测试」 |
 | `web/index.html` | 单页前端（无外部依赖）：Markdown 渲染、窄屏表格转卡片、原文⇄可读版切换 |
 | `skills/article-deep-reading/` | 读解 SOP：`SKILL.md` + `references/checklists.md` + `scripts/`（`extract_wx.py` / `make_appendix.py` / `selfcheck_md.py`） |
 | `skills/math-doc-rigor/` | 数学文档严谨化：六查渲染体检 + 三层标注 + md→PDF 保真流水线 |
@@ -180,7 +180,7 @@ python3 server/doctor.py
 1. `python server/test_replay_v10.py --assert` —— 6 组历史误判回放，v1.0–v1.6 出过的错不许回来
 2. `python server/test_audit.py` —— 空表 / 假算 / 三态判定回归
 3. `python server/test_safe_eval.py` —— 求值器 35 项，绕过即阻断
-4. 推上去看 CI 全绿（14 套一次跑完）
+4. 推上去看 CI 全绿（15 套一次跑完）
 
 改抓取层（`extract.py` 的 `fetch()` 或其分支）后，**必须**跑 `python server/test_extract.py`：
 它是唯一真正调用 `fetch()` 的测试，v2.4 那个「忘 `import os` 导致三条抓取路一起崩」的 bug 就是靠它兜住的。
@@ -189,13 +189,14 @@ python3 server/doctor.py
 
 ## 测试
 
-CI 跑 14 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳过）：
+CI 跑 15 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳过；`test_media` 的分支层不依赖 ffmpeg，真实层才 skip）：
 
 | 测试 | 覆盖 |
 |---|---|
 | `test_safe_eval.py` | 求值器 35 项：12 正确 + 18 攻击 + 5 失败 |
 | `test_app.py` | HTTP 层 24 项：真起服务打真请求 —— 路由、health 不泄 key、analyze 八条校验、SSE 形状与临时件清理、上传六种情形、限流窗口 |
 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
+| `test_media.py` | 媒体层 34 项：假 ffmpeg 覆盖全部失败分支与命令形状（无 ffmpeg、切片失败、时长 `N/A`、产出过小），真 ffmpeg 用例另设 skip |
 | `test_asr_backend.py` | ASR 适配层 29 项：四档后端判定、`describe` / `audio_spec` / `_api_root`、413·429·5xx·非 JSON·连接异常、`verbose_json` 降级重试、本地 whisper 三种失败、分片偏移三档回退 |
 | `test_doctor.py` | 体检脚本 13 项：代理脱敏、`INSECURE_TLS` 告警、certifi 缺失文案、TLS 三结局、无网跑完返回 0 |
 | `test_pipeline_e2e.py` | 五阶段数据流，假模型替身 |
@@ -334,6 +335,14 @@ CI 跑 14 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **发现的时序假设**：临时上传件的删除断言约 5% 概率失败 —— 客户端读到 SSE 结束标记时，服务端 `finally` 里的 `unlink` 可能还没执行。改为轮询等待（`wait_until`），连跑 20 次全过。**「SSE 结束」不等于「临时文件已清」**
 - **反向验证**：临时关掉扩展名白名单，`test_rejects_bad_extension` 立刻变红（`200 != 400`），恢复后全绿
 - **文件**：`server/test_app.py`、`.github/workflows/ci.yml`
+
+### 16. 媒体层补测（v2.7）
+
+- **根因**：`test_asr.py` 里那段媒体用例在没有 ffmpeg 时打一句 `[skip]` 就过去了 —— **那不是测试，是占位**。而真实部署最常见的情形恰恰是没装 ffmpeg
+- **做法分两层**：分支层把 `media.FFMPEG` / `FFPROBE` 换成假值 + 假 `subprocess.run`，不依赖本机环境覆盖全部失败路径与命令形状；真实层用 `skipUnless(has_ffmpeg)` 跑真抽取，验证 wav 能探时长、切片能出多片
+- **覆盖 34 项**：`safe_filename` 七项（含中文保留、Windows 反斜杠不识别）、`probe_duration` 六种失败均不抛、`extract_audio` 命令三段必在与「< 1024 字节视为失败」、`split_audio` 的 wav 必须重编码、`prepare` 时长探不到时不许切片
+- **反向验证两处**：wav 切片改回 `copy` → 红；去掉「< 1024 字节」检查 → 红
+- **文件**：`server/test_media.py`、`.github/workflows/ci.yml`
 
 ## 待办
 
