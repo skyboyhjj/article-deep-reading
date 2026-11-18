@@ -118,5 +118,42 @@ class TestStageContract(unittest.TestCase):
         self.assertIn('"md": md', m.group(0), "done 事件没有带 md")
 
 
+
+class TestReportLayers(unittest.TestCase):
+    """v2.17 分层展示：简约 / 详细 / 原文三档，错一档就有一屏空白。
+
+    这一组不是查逻辑，是查「线接错了没有」——tab 与容器名对不上时，
+    点击没反应、或点了整块空白，浏览器不报错，只能靠契约卡住。
+    """
+
+    KEYS = {"brief": "bview", "view": "rview", "raw": "report"}
+
+    def setUp(self):
+        self.src = PIPELINE.read_text(encoding="utf-8")
+        self.html = INDEX.read_text(encoding="utf-8")
+
+    def test_done_carries_brief(self):
+        m = re.search(r'"stage": "done".{0,240}', self.src, re.S)
+        self.assertTrue(m, "找不到 done 事件")
+        self.assertIn('"brief": brief', m.group(0), "done 事件没带简约版")
+
+    def test_three_tabs_all_have_containers(self):
+        for key, box in self.KEYS.items():
+            self.assertIn(f'data-v="{key}"', self.html, f"缺 tab：{key}")
+            self.assertIn(f'id="{box}"', self.html, f"缺容器：{box}")
+
+    def test_default_tab_is_brief(self):
+        """默认必须是简约版：一次全给等于把判断和依据堆一屏，读者只看前者。"""
+        self.assertRegex(self.html, r'class="tab on"[^>]*data-v="brief"')
+
+    def test_showtab_switches_all_three(self):
+        m = re.search(r"function showTab\((\w+)\)\{(.*?)\n\}", self.html, re.S)
+        self.assertTrue(m, "找不到 showTab")
+        body = m.group(2)
+        for key, box in self.KEYS.items():
+            self.assertIn(box, body, f"showTab 没管 {box}")
+            self.assertIn(f'"{key}"', body, f"showTab 没处理 {key}")
+
+
 if __name__ == "__main__":
     unittest.main()

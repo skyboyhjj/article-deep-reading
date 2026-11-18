@@ -8,9 +8,9 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.16**（2026-11-18）
+- 当前版本：**v2.17**（2026-11-18）
 
-核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、10 套 CI 测试。
+核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、17 套 CI 测试。
 
 `skills/` 与 `server/` 是**同一套方法的两副形态**：前者给平台内的助手用（纯提示词 + 脚本），后者给人用（能跑的服务）。
 
@@ -37,7 +37,7 @@
 | `skills/article-deep-reading/` | 读解 SOP：`SKILL.md` + `references/checklists.md` + `scripts/`（`extract_wx.py` / `make_appendix.py` / `selfcheck_md.py`） |
 | `skills/math-doc-rigor/` | 数学文档严谨化：六查渲染体检 + 三层标注 + md→PDF 保真流水线 |
 | `docs/SOP.md` | 方法本体：七步流程、病灶库、实战档案、工程坑（340 行） |
-| `docs/TESTING.md` | 测试说明（给独立验证者）：16 套逐条、核对清单、三个反向实验、未覆盖边界 |
+| `docs/TESTING.md` | 测试说明（给独立验证者）：17 套逐条、核对清单、三个反向实验、未覆盖边界 |
 | `docs/ARCHITECTURE.md` | 架构决策与失败模式：每个决策后跟一句「不这么做会怎样」（244 行） |
 | `examples/` | 两份完整范例（SwarmEvolve、群作用与计数）：读解正文 + 算据附录 + 可独立跑的脚本 |
 | `CHANGELOG.md` | 只记影响使用者的改动；对外发布自 v2.3 起算 |
@@ -414,8 +414,8 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 ### 24. 测试说明文档入库（v2.15）
 
 - **起因**：用户要把测试交给另一位验证者（TRAE）独立跑一遍，需要一份自包含的操作手册
-- **内容**：12 节 —— 环境要求、两种跑法（bash / PowerShell）、16 套逐条（项数 + 测什么 + 期望末行）、两个易误判点（skip 不等于失败、unittest 写 stderr）、逐条核对清单、三个反向实验、未覆盖边界、常见问题、迭代史、回报格式、端到端工具用法
-- **数字经实测校准**：331 个断言点（不是估算）、16 套、`test_pipeline_e2e` 8 项、`test_replay_v10` 16 条断言
+- **内容**：12 节 —— 环境要求、两种跑法（bash / PowerShell）、17 套逐条（项数 + 测什么 + 期望末行）、两个易误判点（skip 不等于失败、unittest 写 stderr）、逐条核对清单、三个反向实验、未覆盖边界、常见问题、迭代史、回报格式、端到端工具用法
+- **数字经实测校准**：367 个断言点（不是估算）、17 套、`test_pipeline_e2e` 20 项、`test_replay_v10` 16 条断言
 - **验证状态**：TRAE 验证通过后入库
 - **文件**：`docs/TESTING.md`、`README.md`
 
@@ -427,6 +427,15 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **细节**：TTL 只在 `INCR` 返回 1 时设（每次 EXPIRE 会无限延后窗口）；`requirements` 加 redis 与 numpy
 - **测试**：新增 `test_ratelimit.py` 15 项；`test_app.py` 30 → 35 项；CI 16 → 17 套
 - **文件**：`server/ratelimit.py`、`server/app.py`、`server/test_ratelimit.py`、`server/test_app.py`、`requirements.txt`、`.env.example`、`README.md`、`docs/ARCHITECTURE.md`（决策 7）
+
+### 26. 报告分两层：简约版 / 详细版（v2.17）
+
+- **起因**：伦理评估指出「一次全给」的展示问题 —— 读者只看头几行就下判断，而判断最需要依据；「已核」与「未核」平铺在同一张表里，容易被读成「都核过了」
+- **实现**：`pipeline.render_brief()`（结论 + 站得住 + 要改的 + 算不上的），`done` 同时给 `md` 与 `brief`；前端三档 tab「简约 / 详细 / 原文」，默认简约
+- **四条约束**：结论句由 `_count_verdicts()` 整数算出（模型只写末尾评述并标「未核」）、先说站得住的部分、必带 AI 身份与「建议先自己读原文」、分项之和恒等于可核条数
+- **测试中发现**：模型自造判定（如「存疑」）被旧实现静默丢弃，导致「可核 5 条」而分项只加得 4 条 —— 补「判定不明」一档并加断言守门
+- **测试**：`test_pipeline_e2e` 8 → 20 项；`test_ui_contract` 7 → 11 项；两处均做了反向验证
+- **文件**：`server/pipeline.py`、`web/index.html`、`server/test_pipeline_e2e.py`、`server/test_ui_contract.py`、`docs/ARCHITECTURE.md`（决策 8）、`docs/TESTING.md`
 
 ## 待办
 

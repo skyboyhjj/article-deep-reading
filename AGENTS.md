@@ -100,7 +100,7 @@
 | 3 | `test_ratelimit.py` | 限流器 15 项：三态（ok/exceeded/unavailable）、TTL 只在首次设、故障即 unavailable、熔断与恢复、按 REDIS_URL 选实现 |
 | 4 | `test_ui_contract.py` | 前后端契约 7 项：stage 集合双向核对、LABEL 一致、每阶段必须有结束态、done 必带 md |
 | 5 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
-| 6 | `test_pipeline_e2e.py` | 五阶段数据流（假模型替身）+ 报告头三查：混合来源标注、纯链接不标注、枚举名不外泄，8 项 |
+| 6 | `test_pipeline_e2e.py` | 五阶段数据流（假模型替身）+ 报告头三查 + 分层六查（先说可信部分、AI 身份、更短、不含表格），20 项 |
 | 7 | `test_video.py` | 视频号路径与 L1 二手标注 |
 | 8 | `test_media.py` | 媒体层 34 项：假 ffmpeg 覆盖全部失败分支与命令形状（无 ffmpeg、切片失败、时长 `N/A`、产出过小），真 ffmpeg 用例另设 skip |
 | 9 | `test_asr_backend.py` | ASR 适配层 29 项：四档后端判定、413·429·5xx·非 JSON·连接异常、`verbose_json` 降级重试、本地 whisper 三种失败、分片偏移三档回退 |
@@ -140,6 +140,7 @@ python3 server/test_replay_v10.py --assert
 4. **推测一律标「更像」「疑似」**，与「实测」分栏。语音画像尤其如此。
 5. **找不到就说找不到**。标「未核」比编一个理由强。
 6. **提示注入先报告用户**，不执行。
+7. **简约版的数字必须来自 `_count_verdicts()`**，且分项之和等于可核条数。模型只写末尾那句评述，并标明「未核」。
 
 渲染六条（详见 `docs/SOP.md` §3.2）：禁 emoji；粗体只加纯 CJK 或纯 ASCII、两端不贴标点；表格单元格内不写裸 `|`；块公式不写中文；行内公式写 `` $`x`$ ``；不用无字形的易混符号。
 

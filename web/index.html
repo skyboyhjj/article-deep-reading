@@ -195,11 +195,13 @@
   <div class="card" id="reportCard" style="display:none">
     <h2>报告
       <span class="tabs">
-        <button class="tab on" data-v="view">阅读</button>
+        <button class="tab on" data-v="brief">简约</button>
+        <button class="tab" data-v="view">详细</button>
         <button class="tab" data-v="raw">原文</button>
       </span>
     </h2>
-    <div id="rview" class="md"></div>
+    <div id="bview" class="md"></div>
+    <div id="rview" class="md" style="display:none"></div>
     <pre id="report" style="display:none"></pre>
     <div class="actions">
       <a id="dl" download="读解.md" href="#">下载 Markdown</a>
@@ -452,17 +454,16 @@ function handleEvent(chunk){
 
   if(stage === "extract" && data) showExtract(data);
 
-  if(stage === "done" && data && data.md){
+  if(stage === "done" && data && (data.md || data.brief)){
     setStage("render", "ok");   // 兜底：服务端若漏发 render ok，这里补上，避免「成稿」永远转圈
-    $("rview").innerHTML = md2html(data.md);
-    $("report").textContent = data.md;
+    const full = data.md || data.brief || "";
+    const brief = data.brief || full;
+    $("bview").innerHTML = md2html(brief);
+    $("rview").innerHTML = md2html(full);
+    $("report").textContent = full;
     $("reportCard").style.display = "block";
-    document.querySelectorAll(".tab").forEach(t => {
-      t.classList.toggle("on", t.dataset.v === "view");
-    });
-    $("rview").style.display = "block";
-    $("report").style.display = "none";
-    const blob = new Blob([data.md], {type: "text/markdown;charset=utf-8"});
+    showTab("brief");            // 默认给简约版：先结论，详细版按需展开
+    const blob = new Blob([full], {type: "text/markdown;charset=utf-8"});
     $("dl").href = URL.createObjectURL(blob);
     uploadId = "";
     $("file").value = "";
@@ -471,14 +472,15 @@ function handleEvent(chunk){
   }
 }
 
+function showTab(name){
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.dataset.v === name));
+  $("bview").style.display   = name === "brief" ? "block" : "none";
+  $("rview").style.display   = name === "view"  ? "block" : "none";
+  $("report").style.display  = name === "raw"   ? "block" : "none";
+}
+
 document.querySelectorAll(".tab").forEach(t => {
-  t.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
-    t.classList.add("on");
-    const view = t.dataset.v === "view";
-    $("rview").style.display = view ? "block" : "none";
-    $("report").style.display = view ? "none" : "block";
-  });
+  t.addEventListener("click", () => showTab(t.dataset.v));
 });
 
 $("go").addEventListener("click", run);

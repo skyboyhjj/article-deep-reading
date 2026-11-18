@@ -114,11 +114,11 @@ Write-Host ("---- 汇总：" + $(if ($fail -eq 0) { "全通过" } else { "有失
 | # | 文件 | 类型 | 项数 | 测什么 | 期望末行 |
 | --: | :-- | :-- | --: | :-- | :-- |
 | 1 | `test_safe_eval.py` | 脚本 | 35 | 白名单求值器：12 个正确算式 + 18 个攻击用例 + 5 个失败用例 | `全部通过 / 共 35 项` |
-| 2 | `test_app.py` | unittest | 35 | HTTP 层：真起服务打真请求（路由、health 不泄 key、analyze 八条校验、SSE 形状、上传六种、限流、并发额度） | `Ran 30 tests` + `OK` |
+| 2 | `test_app.py` | unittest | 35 | HTTP 层：真起服务打真请求（路由、health 不泄 key、analyze 八条校验、SSE 形状、上传六种、限流、并发额度） | `Ran 35 tests` + `OK` |
 | 3 | `test_ratelimit.py` | unittest | 15 | 限流器：三态返回、TTL 只在首次设、Redis 故障即 unavailable、熔断与恢复、按 `REDIS_URL` 选实现 | `Ran 15 tests` + `OK` |
-| 4 | `test_ui_contract.py` | unittest | 7 | 前后端契约：stage 集合双向核对、LABEL 与 data-s 一致、每阶段必须有结束态、done 必带 md | `Ran 7 tests` + `OK` |
+| 4 | `test_ui_contract.py` | unittest | 11 | 前后端契约：stage 集合双向核对、LABEL 与 data-s 一致、每阶段必须有结束态、done 必带 md 与 brief、三档渲染（简约/详细/原文）的 tab 与容器接线、默认档为简约 | `Ran 11 tests` + `OK` |
 | 5 | `test_extract.py` | unittest | 11 | 抓取层：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 | `Ran 11 tests` + `OK` |
-| 6 | `test_pipeline_e2e.py` | 脚本 | 8 | 五阶段数据流（假模型替身）：阶段齐全、实算值进报告、越权表达式标未实算；报告头三查（混合来源标注、纯链接不标注、内部枚举名不外泄） | `端到端通过` |
+| 6 | `test_pipeline_e2e.py` | 脚本 | 20 | 五阶段数据流（假模型替身）：阶段齐全、实算值进报告、越权表达式标未实算；报告头三查（混合来源标注、纯链接不标注、内部枚举名不外泄）；分层六查（先说可信部分、AI 身份、指向详细版、更短、不含表格、详细版仍有表）；结论三档（全确证 / 多数不实 / 判定不明）与「分项之和恒等于可核条数」 | `端到端通过` |
 | 7 | `test_video.py` | 脚本 | 9 | 视频号路径：L1 二手标注、来源层级声明、总结覆盖率的算术 | `视频号读解通过` |
 | 8 | `test_media.py` | unittest | 34 | 媒体层：假 ffmpeg 覆盖全部失败分支与命令形状；真 ffmpeg 用例另设 `skipUnless` | `Ran 34 tests` + `OK`（无 ffmpeg 时 `skipped=2`） |
 | 9 | `test_asr_backend.py` | unittest | 29 | ASR 适配层：四档后端判定、413/429/5xx/非 JSON/连接异常、`verbose_json` 降级、本地 whisper 三种失败、分片偏移三档回退 | `Ran 29 tests` + `OK` |
@@ -131,7 +131,7 @@ Write-Host ("---- 汇总：" + $(if ($fail -eq 0) { "全通过" } else { "有失
 | 16 | `test_voice.py` | 脚本 | 16 | 语音画像：声学 + 文本双证据，实测与推断分栏 | `语音画像通过` |
 | 17 | `test_replay_v10.py --assert` | 脚本 | 16 | 历史误判回放：v1.0–v1.6 出过的错（6 类），逐条断言不许回来 | `v1.0 回放回归通过` |
 
-合计 **351 个断言点**：35（safe_eval）+ 35 + 15 + 7 + 11 + 8 + 9 + 34 + 29 + 18 + 44 + 31 + 12 + 18 + 13 + 16 + 16。
+合计 **367 个断言点**：35（safe_eval）+ 35 + 15 + 11 + 11 + 20 + 9 + 34 + 29 + 18 + 44 + 31 + 12 + 18 + 13 + 16 + 16。
 
 其中 `test_safe_eval` 的 35 项是脚本自己报的（末行写「共 35 项」），其余 12 套的项数可用 `[ok]` 行数或 `Ran N tests` 直接数出来。
 
@@ -168,9 +168,9 @@ Write-Host ("---- 汇总：" + $(if ($fail -eq 0) { "全通过" } else { "有失
 
 - [ ] `test_safe_eval` 末行 `全部通过 / 共 35 项` —— 求值器白名单被放宽，或被攻击用例绕过（**阻断级**）
 - [ ] `test_app` `Ran 35 tests ... OK` —— 端口绑定失败（换机器/防火墙）、`127.0.0.1:0` 不允许、限流计数未清
-- [ ] `test_ui_contract` `Ran 7 tests ... OK` —— 改了 `pipeline.py` 的 stage 名或 `index.html` 的标签却没同步
+- [ ] `test_ui_contract` `Ran 11 tests ... OK` —— 改了 `pipeline.py` 的 stage 名或 `index.html` 的标签却没同步
 - [ ] `test_extract` `Ran 11 tests ... OK` —— 抓取层改动（尤其 `fetch()` 里的环境变量分支）
-- [ ] `test_pipeline_e2e` 末行 `端到端通过`（内部 8 项 [ok]）—— 五阶段数据流断裂、报告模板改动、来源构成标注被删
+- [ ] `test_pipeline_e2e` 末行 `端到端通过`（内部 20 项 [ok]）—— 五阶段数据流断裂、报告模板改动、来源构成标注被删
 - [ ] `test_video` 末行 `视频号读解通过` —— L1 二手标注被删、覆盖率算术改动
 - [ ] `test_media` `Ran 34 tests ... OK` —— ffmpeg 命令形状改动（如 wav 的 `pcm_s16le` 被换回 `copy`）
 - [ ] `test_asr_backend` `Ran 29 tests ... OK` —— 后端判定或错误码映射改动
@@ -265,6 +265,7 @@ A：`chcp 65001` 后再跑；或在 PowerShell 里设 `[Console]::OutputEncoding
 | v2.6 | `test_app` | `app.py` 一条测试都没有，而它是最外面那层门 |
 | v2.7 | `test_media` | `test_asr` 里媒体用例在无 ffmpeg 时打一句 `[skip]` 等于占位 |
 | v2.12 | `test_ui_contract` | 端到端实测发现「成稿」标签永远转圈，根因是服务端漏发结束态 |
+| v2.17 | `test_pipeline_e2e` 加 12 项、`test_ui_contract` 加 4 项 | 分层展示上线：简约版每个数字须可回溯到条目；写测试时发现「未知判定被静默丢弃」导致统计自相矛盾（可核 5 条、分项只加得 4 条），补「判定不明」一档 |
 | v2.13 | `test_pipeline_e2e` 加 3 项 | 另一位验证者实测「URL 残留 + 上传视频」导致报告头被污染，补上报告头的三条约束 |
 
 共同规律：**bug 几乎都出在「没有测试守着的那个入口」**。这也是为什么这套测试值得跑第二遍、第三遍。
@@ -287,7 +288,7 @@ A：`chcp 65001` 后再跑；或在 PowerShell 里设 `[Console]::OutputEncoding
 
 ## 十二、额外工具：输入切换端到端检查
 
-16 套测试之外还有一支，不在 `server/test_*` 里，但同样应当跑：
+17 套测试之外还有一支，不在 `server/test_*` 里，但同样应当跑：
 
 ```bash
 python3 tools/e2e_switch_check.py --rounds 2

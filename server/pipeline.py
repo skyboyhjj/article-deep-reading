@@ -939,17 +939,20 @@ def _cell(s: str, n: int = 120) -> str:
 
 _CN_NUM = ["一", "二", "三", "四", "五", "六", "七", "八", "九"]
 
+# 来源类型的展示名。内部枚举名（video_upload 之类）不许出现在报告里。
+KIND_LABEL = {
+    "wechat": "微信公众号",
+    "wechat_channel": "微信视频号（经元宝总结中转）",
+    "arxiv": "arXiv 论文",
+    "generic": "网页",
+    "pasted": "粘贴正文",
+    "video_upload": "上传的音视频",
+}
+
 
 def render_report(url: str, doc: dict, triage: dict, verify: dict, calc: dict, commentary: str) -> str:
     """确定性拼装。所有数字都从这里注入，不经模型之手。"""
-    KIND = {
-        "wechat": "微信公众号",
-        "wechat_channel": "微信视频号（经元宝总结中转）",
-        "arxiv": "arXiv 论文",
-        "generic": "网页",
-        "pasted": "粘贴正文",
-        "video_upload": "上传的音视频",
-    }
+    KIND = KIND_LABEL
     L: list[str] = []
     L.append(f"# 读解：{doc['title'] or url}\n")
     L.append(f"- 来源：{url or '（无链接，仅上传音视频）'}")
@@ -1248,6 +1251,151 @@ def render_report(url: str, doc: dict, triage: dict, verify: dict, calc: dict, c
             "本服务无法发现。上传原视频即可升为原声读解。"
         )
     L.append(tail)
+    return "\n".join(L)
+
+
+# ---------------------------------------------------------------- 简约版
+BRIEF_MAX = 5
+
+
+def _fmt_num(v) -> str:
+    """给读者看的数值去掉无意义的尾零：90.0 → 90，90.5 保留。"""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    if f == int(f) and abs(f) < 1e15:
+        return str(int(f))
+    return f"{f:g}"
+
+
+def _count_verdicts(verify: dict, calc: dict) -> dict:
+    """统计判定分布。简约版里的每个数字都出自这里，不经模型。"""
+    items = [it for it in (verify.get("items") or [])
+             if isinstance(it, dict) and it.get("verdict")]
+    c = {"n": len(items), "确证": 0, "不实": 0, "半对": 0, "未核": 0, "其他": 0}
+    for it in items:
+        v = str(it["verdict"]).strip()
+        if v in ("确证", "不实", "半对", "未核"):
+            c[v] += 1
+        else:
+            c["其他"] += 1     # 模型偶尔自造判定（如「存疑」）。旧实现直接丢掉，
+                               # 于是「可核 5 条」而分项只加得 4 条 —— 数字自己打架。
+                               # 现在单列一档，分项之和恒等于 n。
+    recs = [r for r in (calc.get("items") or []) if isinstance(r, dict)]
+    c["已实算"] = sum(1 for r in recs if r.get("status") == "已实算")
+    c["不符"] = sum(1 for r in recs if r.get("status") == "不符")
+    return c
+
+
+def _brief_verdict_line(c: dict) -> str:
+    """一句话结论：三档 + 两条限定，全部由计数算出。"""
+    n = c["n"]
+    if n == 0:
+        return ("**没列到可核项** —— 可能通篇是观点，也可能正文没抓全。"
+                "先确认原文完整，再决定这份报告值不值得看。")
+    bad = c["不实"] + c["半对"]
+    other = c.get("其他", 0)
+    if bad == 0 and other == 0:
+        head = f"**核到的 {n} 条都站得住**"
+    elif bad / n <= 0.3:
+        head = (f"**大体可核，{bad} 处需要改**" if bad
+                else f"**大体可核，但有 {other} 条判定不明**")
+    else:
+        head = f"**问题不少（{bad}/{n}），建议对照原文再判断**"
+    tails = []
+    if c["不符"]:
+        tails.append(f"另有 {c['不符']} 处实算与原文声称不符")
+    if other:
+        tails.append(f"{other} 条判定不明")
+    if c["未核"]:
+        tails.append(f"{c['未核']} 条查不到出处（是没核，不是没问题）")
+    return head + ("；" + "；".join(tails) if tails else "") + "。"
+
+
+def render_brief(url: str, doc: dict, triage: dict, verify: dict,
+                 calc: dict, commentary: str) -> str:
+    """简约版：一屏之内回答「这篇能不能信、哪几处要改」。
+
+    详细版（render_report）是取证记录，简约版是给读者的结论。
+    分层的理由见 docs/ARCHITECTURE.md 决策 8 —— 一次全给，等于把「判断」
+    和「判断的依据」堆在同一屏，读者多半只看前者，而前者恰恰最需要被核对。
+    """
+    c = _count_verdicts(verify, calc)
+    L = [f"# {doc.get('title') or url}\n"]
+
+    L.append(_brief_verdict_line(c))
+    L.append("")
+
+    stat = [f"可核 {c['n']} 条"]
+    if c["确证"]:
+        stat.append(f"有出处 {c['确证']}")
+    if c["不实"] + c["半对"]:
+        stat.append(f"有问题 {c['不实'] + c['半对']}")
+    if c["未核"]:
+        stat.append(f"查不到 {c['未核']}")
+    if c.get("其他"):
+        stat.append(f"判定不明 {c['其他']}")
+    if c["已实算"]:
+        stat.append(f"实算通过 {c['已实算']}")
+    if c["不符"]:
+        stat.append(f"实算不符 {c['不符']}")
+    src = KIND_LABEL.get(doc.get("kind"), "")
+    if doc.get("authors"):
+        src += "·" + "、".join(doc["authors"][:2])
+    L.append("· " + " · ".join(stat) + (f"　｜　来源：{src}" if src else ""))
+    L.append("")
+
+    oks = [it for it in (verify.get("items") or [])
+           if isinstance(it, dict) and it.get("verdict") == "确证"][:3]
+    if oks:
+        L.append("## 站得住的部分")
+        for it in oks:
+            q = _trim(it.get("quote", ""), 60)
+            ev = _trim(it.get("evidence", ""), 46)
+            L.append(f"- {q}" + (f"（依据：{ev}）" if ev else ""))
+        L.append("")
+
+    bads = [it for it in (verify.get("items") or [])
+            if isinstance(it, dict) and it.get("verdict") in ("不实", "半对")]
+    L.append("## 需要改的地方")
+    if bads:
+        for it in bads[:BRIEF_MAX]:
+            q = _trim(it.get("quote", ""), 60)
+            fix = _trim(it.get("fix", ""), 40)
+            ev = _trim(it.get("evidence", ""), 46)
+            line = f"- {q} —— **{it.get('verdict')}**"
+            if fix:
+                line += f"：{fix}"
+            if ev:
+                line += f"（依据：{ev}）"
+            L.append(line)
+        if len(bads) > BRIEF_MAX:
+            L.append(f"- 另有 {len(bads) - BRIEF_MAX} 处，见详细版")
+    else:
+        L.append("没有发现需要改的。**这不等于本文没问题**，只等于本次核到的部分站得住。")
+    L.append("")
+
+    wrong = [r for r in (calc.get("items") or [])
+             if isinstance(r, dict) and r.get("status") == "不符"][:3]
+    if wrong:
+        L.append("## 算不上的地方")
+        for r in wrong:
+            L.append(f"- {_trim(r.get('claim', ''), 50)}：算得 {_fmt_num(r.get('value'))}，"
+                     f"原文声称 {r.get('expected')}")
+        L.append("")
+
+    first = (commentary or "").strip().split("。")[0].strip()
+    if first and not _DIGIT.search(first):
+        L.append("## 评述（模型写的，未核）")
+        L.append(first + "。")
+        L.append("")
+
+    L.append("---")
+    L.append(f"本报告由 AI 依据所给正文生成，**未经人工复核**。"
+             f"完整核验（{c['n']} 条，含依据与出处）见「详细版」。")
+    L.append("")
+    L.append("> 建议先自己读一遍原文，再对照这份核验 —— 读解能省时间，不能替你判断。")
     return "\n".join(L)
 
 
@@ -1567,7 +1715,9 @@ def analyze(
         # 必须显式收尾：前端只在 status=run/ok/warn/fail 时改标签，
         # 少了这一条「成稿」会永远停在「…」（v2.12 实测发现）。
         yield {"stage": "render", "status": "ok", "text": "报告已生成"}
-        yield {"stage": "done", "status": "ok", "text": f"完成（{len(md)} 字符）", "data": {"md": md}}
+        brief = render_brief(url, doc, triage, verify, calc, commentary)
+        yield {"stage": "done", "status": "ok", "text": f"完成（{len(md)} 字符）",
+               "data": {"md": md, "brief": brief}}
     except llm.LLMNotConfigured as exc:
         yield {"stage": "triage", "status": "fail", "text": str(exc)}
     except llm.LLMError as exc:

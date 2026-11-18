@@ -83,6 +83,55 @@ def _report_header_checks() -> list[tuple[str, bool]]:
     ]
 
 
+def _brief_checks() -> list[tuple[str, bool]]:
+    """v2.17：分层展示 —— 结论由计数算出、先说可信部分、带 AI 身份。"""
+    doc = {"title": "测试", "authors": [], "kind": "wechat", "published": "2026-01-01",
+           "text": "正文" * 100, "n_chars": 300}
+    mixed = {"items": [
+        {"n": 1, "verdict": "确证", "quote": "有出处的一条", "evidence": "据某站", "fix": "无需修改"},
+        {"n": 2, "verdict": "不实", "quote": "站不住的一条", "evidence": "原文无据", "fix": "改为估算"},
+        {"n": 3, "verdict": "未核", "quote": "查不到的一条", "evidence": "无出处", "fix": "标注来源"},
+    ]}
+    empty = {"items": []}
+    brief = pipeline.render_brief("u", doc, TRIAGE, mixed, empty, "它讲对了一处。")
+    full = pipeline.render_report("u", doc, TRIAGE, mixed, empty, "它讲对了一处。")
+
+    all_ok = {"items": [{"n": i, "verdict": "确证", "quote": f"q{i}",
+                         "evidence": "e", "fix": "无"} for i in range(1, 4)]}
+    b_ok = pipeline.render_brief("u", doc, TRIAGE, all_ok, empty, "")
+
+    mostly_bad = {"items": [{"n": i, "verdict": "不实", "quote": f"q{i}",
+                             "evidence": "e", "fix": "改"} for i in range(1, 4)]}
+    b_bad = pipeline.render_brief("u", doc, TRIAGE, mostly_bad, empty, "")
+
+    # 不变量：分项之和必须等于 n。旧实现把模型自造的判定（如「存疑」）静默丢弃，
+    # 于是「可核 5 条」而分项只加得 4 条 —— 报告自己的数字打架。
+    weird = {"items": [
+        {"n": 1, "verdict": "确证", "quote": "q", "evidence": "e", "fix": "无"},
+        {"n": 2, "verdict": "不实", "quote": "q", "evidence": "e", "fix": "改"},
+        {"n": 3, "verdict": "半对", "quote": "q", "evidence": "e", "fix": "补"},
+        {"n": 4, "verdict": "未核", "quote": "q", "evidence": "e", "fix": "标"},
+        {"n": 5, "verdict": "存疑", "quote": "q", "evidence": "e", "fix": "补"},
+    ]}
+    cw = pipeline._count_verdicts(weird, empty)
+    total = cw["确证"] + cw["不实"] + cw["半对"] + cw["未核"] + cw["其他"]
+    b_weird = pipeline.render_brief("u", doc, TRIAGE, weird, empty, "")
+
+    return [
+        ("未知判定不被静默丢弃", cw["其他"] == 1),
+        ("分项之和恒等于可核条数", total == cw["n"] == 5),
+        ("未知判定在统计行可见", "判定不明 1" in b_weird),
+        ("简约版先说可信部分", brief.index("站得住的部分") < brief.index("需要改的地方")),
+        ("简约版带 AI 身份声明", "未经人工复核" in brief),
+        ("简约版指向详细版", "详细版" in brief),
+        ("简约版比详细版短", len(brief) < len(full)),
+        ("简约版不含核验表格", "| 判定 |" not in brief),
+        ("详细版仍保留核验表", "| 判定 |" in full),
+        ("全确证时结论说「都站得住」", "都站得住" in b_ok),
+        ("多数不实时结论说「问题不少」", "问题不少" in b_bad),
+    ]
+
+
 def main() -> int:
     install_fakes()
     body = "某文声称效率提升一百倍，并称这是已证明的定理。" * 20
@@ -112,8 +161,10 @@ def main() -> int:
         ("作者与主体一节存在", "作者与主体核对" in md),
         ("评述段落存在", "把估算标成了估算" in md),
         ("免责声明存在", "不能替代读者本人对原始出处的核对" in md),
+        ("done 事件同时带简约版", bool((done["data"].get("brief") or "").strip())),
     ]
     checks += _report_header_checks()
+    checks += _brief_checks()
     for name, ok in checks:
         print(("[ok] " if ok else "[FAIL] ") + name)
         if not ok:
