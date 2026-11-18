@@ -36,6 +36,11 @@ WEB = HERE.parent / "web"
 # 极简限流：每 IP 每小时 N 次（防滥用；真实场景请换 Redis + 更细策略）
 RATE_LIMIT = int(os.environ.get("RATE_LIMIT_PER_HOUR", "10"))
 
+# /api/analyze 的请求体上限（字节）。中文一字 3 字节，故约 8.6 万汉字。
+BODY_LIMIT = 260_000
+# 超限时最多额外读掉多少再回复：够覆盖正常误操作，又不给恶意大包留带宽。
+DRAIN_MAX = 5 * 1024 * 1024
+
 # 上传：用户自己导出视频号视频后传上来，是拿到「原声」的唯一可靠路径
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "deepread_uploads"
 ALLOWED_EXT = {".mp4", ".mov", ".m4v", ".m4a", ".mp3", ".wav", ".aac",
@@ -97,6 +102,18 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     # ---------- 上传 ----------
+    def _drain(self, n: int) -> None:
+        """把请求体读掉丢弃。
+
+        超限时不读就回复，残留字节会被当成下一个请求解析（HTTP/1.1 keep-alive），
+        客户端也可能先吃到连接重置、看不到那句错误文案。
+        """
+        while n > 0:
+            chunk = self.rfile.read(min(CHUNK, n))
+            if not chunk:
+                break
+            n -= len(chunk)
+
     def _handle_upload(self) -> None:
         """裸字节流上传（Content-Type: application/octet-stream）。
 
@@ -194,8 +211,16 @@ class Handler(BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             n = 0
-        if n <= 0 or n > 260_000:
-            self._json(400, {"error": "请求体缺失或过大"})
+        if n <= 0:
+            self._json(400, {"error": "请求体缺失"})
+            return
+        if n > BODY_LIMIT:
+            # 260 KB 是防内存的硬闸。中文一字 3 字节，所以实际能粘的汉字远少于字符上限，
+            # 这里直接把真实可用量写出来，别让用户对着「20 万字符」白贴一遍。
+            if n <= DRAIN_MAX:      # 常规超限：读完再回，客户端才收得到这条提示
+                self._drain(n)
+            self._json(400, {"error": f"请求体过大（上限 {round(BODY_LIMIT / 1024)} KB，"
+                                      "中文约 8.6 万汉字）；长文请分段粘贴"})
             return
         try:
             payload = json.loads(self.rfile.read(n) or b"{}")

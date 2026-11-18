@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.7**（2026-11-18）
+- 当前版本：**v2.8**（2026-11-18）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、10 套 CI 测试。
 
@@ -194,7 +194,7 @@ CI 跑 15 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 | 测试 | 覆盖 |
 |---|---|
 | `test_safe_eval.py` | 求值器 35 项：12 正确 + 18 攻击 + 5 失败 |
-| `test_app.py` | HTTP 层 24 项：真起服务打真请求 —— 路由、health 不泄 key、analyze 八条校验、SSE 形状与临时件清理、上传六种情形、限流窗口 |
+| `test_app.py` | HTTP 层 25 项：真起服务打真请求 —— 路由、health 不泄 key、analyze 八条校验、超限后同连接不被污染、SSE 形状与临时件清理、上传六种情形、限流窗口 |
 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
 | `test_media.py` | 媒体层 34 项：假 ffmpeg 覆盖全部失败分支与命令形状（无 ffmpeg、切片失败、时长 `N/A`、产出过小），真 ffmpeg 用例另设 skip |
 | `test_asr_backend.py` | ASR 适配层 29 项：四档后端判定、`describe` / `audio_spec` / `_api_root`、413·429·5xx·非 JSON·连接异常、`verbose_json` 降级重试、本地 whisper 三种失败、分片偏移三档回退 |
@@ -331,7 +331,7 @@ CI 跑 15 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **根因**：`app.py` 一条测试都没有，而它是最外面那层门 —— 路由、上传校验、正文上限、限流、SSE 收尾全靠手工点
 - **做法**：绑定 `127.0.0.1:0` 起真 `ThreadingHTTPServer`，用 `http.client` 打真请求；`/api/analyze` 成功路径用假 `pipeline.analyze`，只验 SSE 形状与收尾
 - **覆盖 24 项**：GET 四项（含 health 九字段且不泄露 key）、analyze 八条校验、SSE 四项（含临时上传件用完即删）、upload 六项（含文件名穿越净化）、限流窗口越过一小时
-- **发现的文案偏差**（未改行为）：正文上限写「20 万字符」，但请求体另有 26 万字节闸；中文 20 万字符 = 60 万字节，先撞后者，**实际可粘贴约 8.6 万汉字**。已加成用例 `test_chinese_hits_body_limit_first` 钉住边界
+- **发现的文案偏差**：正文上限原写「20 万字符」，但请求体另有 26 万字节闸；中文 20 万字符 = 60 万字节，先撞后者，**实际可粘贴约 8.6 万汉字**。v2.8 已改准（见第 17 条）
 - **发现的时序假设**：临时上传件的删除断言约 5% 概率失败 —— 客户端读到 SSE 结束标记时，服务端 `finally` 里的 `unlink` 可能还没执行。改为轮询等待（`wait_until`），连跑 20 次全过。**「SSE 结束」不等于「临时文件已清」**
 - **反向验证**：临时关掉扩展名白名单，`test_rejects_bad_extension` 立刻变红（`200 != 400`），恢复后全绿
 - **文件**：`server/test_app.py`、`.github/workflows/ci.yml`
@@ -343,6 +343,14 @@ CI 跑 15 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **覆盖 34 项**：`safe_filename` 七项（含中文保留、Windows 反斜杠不识别）、`probe_duration` 六种失败均不抛、`extract_audio` 命令三段必在与「< 1024 字节视为失败」、`split_audio` 的 wav 必须重编码、`prepare` 时长探不到时不许切片
 - **反向验证两处**：wav 切片改回 `copy` → 红；去掉「< 1024 字节」检查 → 红
 - **文件**：`server/test_media.py`、`.github/workflows/ci.yml`
+
+### 17. 请求体上限文案改准 + keep-alive 残留修复（v2.8）
+
+- **根因**：文案写「粘贴正文上限 20 万字符」，但请求体另有 260 KB 字节闸；中文一字 3 字节，20 万字符 = 60 万字节，**永远先撞第一道**，而第一道的文案「请求体缺失或过大」对用户没有指导意义
+- **修复**：拆成三条 —— 「请求体缺失」/「请求体过大（上限 254 KB，中文约 8.6 万汉字）；长文请分段粘贴」/「粘贴正文过长（上限 20 万字符，仅 ASCII 可达）」
+- **顺带修的真问题**：超限时原来不读完请求体就回复，keep-alive 下残留字节会被当成下一个请求解析，客户端也可能先吃到连接重置而看不到提示。现在常规超限（≤5 MB）先 `_drain` 读完再回，超过 5 MB 直接回
+- **新增用例**：`test_oversize_does_not_poison_next_request` —— 同一连接先超限再正常请求，第二个必须仍 200；去掉 drain 立刻红
+- **文件**：`server/app.py`、`server/test_app.py`
 
 ## 待办
 

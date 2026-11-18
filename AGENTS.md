@@ -61,9 +61,10 @@
 | v2.4 抓取全崩 | 任何链接都抛 `NameError: name 'os' is not defined` | `extract.py` 用了 `os.environ` 却漏 `import os`；CI 只测流水线下半段（粘贴正文），抓取层零覆盖 | `test_extract.py` 真调 `fetch()`，覆盖 `FETCH_BACKEND` 三档与未设置 |
 | v2.5 体检自崩 | 证书校验失败时体检脚本抛 `AttributeError` | `doctor.py` 直读 `exc.verify_message`，该属性并非所有实例都有 | 取不到退回 `str(exc)`；`test_doctor.py` 覆盖三种 TLS 结局 |
 | v2.5 断言被 mock 骗 | 降级重试用例断言两次请求的 `data` 差异，全部不符 | `call_args_list` 存的是字典**引用**，重试里 `pop()` 改掉了先前那条记录 | 在假 `post` 内部当场快照 `dict(data)` 再断言 |
-| v2.6 上限文案偏乐观 | 提示写「粘贴正文上限 20 万字符」，中文实际只能到约 8.6 万字 | 请求体另有 26 万字节闸，中文 20 万字符 = 60 万字节，先撞后者 | 用例 `test_chinese_hits_body_limit_first` 钉住边界；文案待改 |
+| v2.6 上限文案偏乐观 | 提示写「粘贴正文上限 20 万字符」，中文实际只能到约 8.6 万字 | 请求体另有 260 KB 字节闸，中文 20 万字符 = 60 万字节，先撞后者 | v2.8 已改准文案；用例断言必须含「8.6 万汉字」 |
 | v2.6 断言抢跑 | 临时上传件的删除断言约 5% 概率失败 | 客户端读到 SSE 结束标记时，服务端 `finally` 里的 `unlink` 可能还没执行 | 改为轮询等条件成立（`wait_until`）；理解「SSE 结束 ≠ 临时文件已清」 |
 | v2.7 skip 不是测 | 「没装 ffmpeg」这条最常见的情形从来没被执行过 | `test_asr` 缺 ffmpeg 时打一句 `[skip]` 就过，等于占位 | `test_media.py` 用假 `subprocess.run` 覆盖全部分支；真 ffmpeg 用例单独 `skipUnless` |
+| v2.8 超限污染下一请求 | 超限回复后，同一连接上的下一个请求解析错乱 | 请求体没读完就回复，keep-alive 下残留字节被当成新请求 | `_drain()` 先读完再回（≤5 MB 才 drain）；用例 `test_oversize_does_not_poison_next_request` |
 
 **共同规律**：最严重的错几乎都不是算错，而是把「没查」写成了「查过」。
 
@@ -90,7 +91,7 @@
 | 顺序 | 测试 | 覆盖 |
 |---|---|---|
 | 1 | `test_safe_eval.py` | 求值器 35 项：12 正确 + 18 攻击 + 5 失败 —— **绕过即阻断** |
-| 2 | `test_app.py` | HTTP 层 24 项：真起服务打真请求 —— 路由、health 不泄 key、analyze 八条校验、SSE 形状与临时件清理、上传六种情形、限流窗口 |
+| 2 | `test_app.py` | HTTP 层 25 项：真起服务打真请求 —— 路由、health 不泄 key、analyze 八条校验、超限后同连接不被污染、SSE 形状与临时件清理、上传六种情形、限流窗口 |
 | 3 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
 | 4 | `test_pipeline_e2e.py` | 五阶段数据流，假模型替身 |
 | 5 | `test_video.py` | 视频号路径与 L1 二手标注 |

@@ -124,7 +124,7 @@ class TestAnalyzeValidation(Base):
         status, _, body = request("POST", "/api/analyze", body=b"",
                                   headers={"Content-Length": "0"})
         self.assertEqual(status, 400)
-        self.assertIn("请求体缺失或过大", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["error"], "请求体缺失")
 
     def test_oversize_body(self):
         payload = b"x" * 260_001
@@ -132,6 +132,24 @@ class TestAnalyzeValidation(Base):
                                   headers={"Content-Length": str(len(payload))})
         self.assertEqual(status, 400)
         self.assertIn("过大", json.loads(body)["error"])
+
+    def test_oversize_does_not_poison_next_request(self):
+        """超限时若把 body 读完再回，同一连接上的下一个请求才不会解析错乱。"""
+        conn = http.client.HTTPConnection(HOST, PORT, timeout=20)
+        try:
+            payload = b"x" * 260_001
+            conn.request("POST", "/api/analyze", body=payload,
+                         headers={"Content-Length": str(len(payload))})
+            first = conn.getresponse()
+            first.read()
+            self.assertEqual(first.status, 400)
+
+            conn.request("GET", "/api/health")
+            second = conn.getresponse()
+            self.assertEqual(second.status, 200)
+            self.assertTrue(json.loads(second.read())["ok"])
+        finally:
+            conn.close()
 
     def test_bad_json(self):
         status, _, body = request("POST", "/api/analyze", body=b"{not json",
@@ -161,14 +179,19 @@ class TestAnalyzeValidation(Base):
         self.assertIn("过长", json.loads(body)["error"])
 
     def test_chinese_hits_body_limit_first(self):
-        """中文 20 万字符 = 60 万字节，先撞 26 万字节那条 —— 文案说的「20 万字符」对中文到不了。
+        """中文 20 万字符 = 60 万字节，先撞 260 KB 那道闸。
 
-        这不是漏洞（两种情况都拦住），但提示语对中文用户偏乐观：
-        实际可粘贴约 8.6 万汉字。记在这里，改文案时别忘了。
+        两道限制在中文下并不重叠：字符上限（20 万）永远走不到，
+        实际可用量由字节闸决定 —— 约 8.6 万汉字。
+        所以那条错误文案必须把这个数说出来，否则用户会对着
+        「上限 20 万字符」白贴一遍。v2.8 已改。
         """
         status, _, body = post_json("/api/analyze", {"text": "字" * 200_001})
         self.assertEqual(status, 400)
-        self.assertIn("请求体缺失或过大", json.loads(body)["error"])
+        msg = json.loads(body)["error"]
+        self.assertIn("请求体过大", msg)
+        self.assertIn("8.6 万汉字", msg)
+        self.assertIn("分段", msg)
 
     def test_unknown_post_path(self):
         status, _, _ = post_json("/api/nope", {})
