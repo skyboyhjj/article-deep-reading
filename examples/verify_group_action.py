@@ -1,0 +1,342 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+verify_group_action.py
+《群作用与计数：轨道公式、Erlangen纲领及Burnside引理详论》
+（公众号「数学科学的探索之旅」，署名 人间星海，2026-04-04）的数值核验。
+
+做法：对文中每一个可数的结论，都用两条独立路径算一遍——
+  (a) 按文中自己给的公式算；
+  (b) 用置换群 + 暴力枚举轨道算（不经公式）。
+两者与文中的数字三方对账。
+
+五组：
+  1  项链（仅旋转）与手镯（含反射）—— 文中例11、例12
+  2  正多面体着色 —— 例13、例16、习题2、习题4
+  3  化学与图论与布尔函数 —— 例14、例15、例17、3.7.1
+  4  D_n 偶数情形的公式本身（错在公式，不只是错在代入）
+  5  共形群 CO(n) 与真共形群的维数对比
+
+依赖：仅标准库（itertools / math）。
+"""
+from itertools import permutations, product
+from math import gcd
+
+
+# ---------------------------------------------------------------- 基础工具
+def orbit_count(perms, n, k):
+    """k 种颜色给 n 个位置着色，群 perms 作用，暴力算轨道数。
+    perms: [(像位置数组)]，约定 (pi f)(i) = f(pi[i])。"""
+    from itertools import product as iproduct
+    seen = set()
+    cnt = 0
+    for f in iproduct(range(k), repeat=n):
+        if f in seen:
+            continue
+        cnt += 1
+        for p in perms:
+            g = tuple(f[p[i]] for i in range(n))
+            seen.add(g)
+            # 轨道闭包（群已封闭，一次作用即可覆盖整个轨道）
+    return cnt
+
+
+def burnside(perms, n, k):
+    """按 Burnside 引理算轨道数，逐元素暴力数不动点。"""
+    s = 0
+    for p in perms:
+        # 不动点：每个循环上着色恒定
+        fixed = 1
+        seen = [False] * n
+        for i in range(n):
+            if seen[i]:
+                continue
+            l = 0
+            j = i
+            while not seen[j]:
+                seen[j] = True
+                j = p[j]
+                l += 1
+            fixed *= k          # 该循环任取一色
+        s += fixed
+    assert s % len(perms) == 0
+    return s // len(perms)
+
+
+def orbits_on(perms, N):
+    """置换群 perms 作用在 N 个元素上的轨道数（直接 BFS）。"""
+    seen = [False] * N
+    cnt = 0
+    for i in range(N):
+        if seen[i]:
+            continue
+        cnt += 1
+        stack = [i]
+        seen[i] = True
+        while stack:
+            x = stack.pop()
+            for p in perms:
+                y = p[x]
+                if not seen[y]:
+                    seen[y] = True
+                    stack.append(y)
+    return cnt
+
+
+def cyclic(n):
+    return [tuple((i + t) % n for i in range(n)) for t in range(n)]
+
+
+def dihedral(n):
+    """D_n: 旋转 r^t 与反射 s_t: i -> t - i"""
+    out = []
+    for t in range(n):
+        out.append(tuple((i + t) % n for i in range(n)))
+    for t in range(n):
+        out.append(tuple((t - i) % n for i in range(n)))
+    return out
+
+
+# ---------------------------------------------------------------- 组 1
+def group1():
+    print("=" * 76)
+    print("组 1 · 项链（仅旋转）与手镯（含反射）：文中例11 与例12")
+    print("=" * 76)
+    print("  n   k | 旋转轨道(暴力) Burnside | 手镯(暴力) | 文中例12 公式")
+    print("  " + "-" * 72)
+    rows = []
+    for n, k in [(4, 2), (5, 2), (6, 2), (7, 2), (8, 2), (6, 3)]:
+        neck = orbit_count(cyclic(n), n, k)
+        neck2 = burnside(cyclic(n), n, k)
+        br = orbit_count(dihedral(n), n, k)
+        # 文中公式：n 偶 -> (1/2n)(Σk^gcd + n k^{n/2})；n 奇 -> (... + n k^{(n+1)/2})
+        s = sum(k ** gcd(n, t) for t in range(n))
+        if n % 2 == 1:
+            paper = (s + n * k ** ((n + 1) // 2)) // (2 * n)
+        else:
+            paper = (s + n * k ** (n // 2)) // (2 * n)
+        flag = "  ← 文中错" if paper != br else ""
+        print(f"  {n:2d}  {k} | {neck:>8d} {neck2:>12d} | {br:>8d} | {paper:>8d}{flag}")
+        rows.append((n, k, neck, br, paper))
+    print()
+    n, k = 6, 2
+    s = sum(k ** gcd(n, t) for t in range(n))
+    print(f"  以 n=6,k=2 为例逐项展开：")
+    print(f"    旋转部分 Σ k^gcd(6,t) = " +
+          " + ".join(f"2^{gcd(6,t)}" for t in range(6)) + f" = {s}")
+    print(f"    文中写法：反射全部按 k^(n/2)=2^3=8 计 → 6×8 = 48，总 {s+48}，{s+48}/12 = {(s+48)//12}")
+    print(f"    实际反射分两类（各 3 个）：")
+    print(f"      过对顶点轴（3 个）：轴上 2 个顶点不动 + 2 个 2-循环 → 2^(2+2) = 16，3×16 = 48")
+    print(f"      过对边中点轴（3 个）：无不动顶点 + 3 个 2-循环 → 2^3 = 8，3×8 = 24")
+    print(f"    正确总和 {s+48+24}，{s+48+24}/12 = {(s+48+24)//12}")
+    print(f"    ⟹ 文中 11 应为 13（OEIS A000029 的 n=6 项 = 13）")
+    print()
+    print("  错因：n 为偶数时，两条反射轴类型并不对称——")
+    print("    过对顶点轴有 2 个不动点（轴上那两个顶点），文中写「无不动点」是错的；")
+    print("    只有过对边中点轴才是「无不动点、n/2 个 2-循环」。")
+    print("  这不是代入算错，是公式本身错，所以三类错误（描述、公式、数值）自洽地错在一起。")
+    return rows
+
+
+# ---------------------------------------------------------------- 组 2
+def cube_rotations():
+    rot = []
+    for perm in permutations(range(3)):
+        for signs in product((1, -1), repeat=3):
+            # 行列式
+            m = [[0] * 3 for _ in range(3)]
+            for r in range(3):
+                m[r][perm[r]] = signs[r]
+            det = (m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+                   - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+                   + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]))
+            if det == 1:
+                rot.append(m)
+    return rot
+
+
+def apply(m, v):
+    return tuple(sum(m[i][j] * v[j] for j in range(3)) for i in range(3))
+
+
+def group2():
+    print()
+    print("=" * 76)
+    print("组 2 · 正多面体着色：例13、例16、习题2、习题4")
+    print("=" * 76)
+    # 立方体顶点 (x,y,z) in {0,1}^3
+    verts = list(product((1, -1), repeat=3))
+    idx = {v: i for i, v in enumerate(verts)}
+    rots = cube_rotations()
+    perms = [tuple(idx[apply(m, v)] for v in verts) for m in rots]
+    print(f"  立方体旋转群阶 = {len(rots)}（文中说 24）")
+    for k in (2, 3):
+        b = burnside(perms, 8, k)
+        o = orbit_count(perms, 8, k) if k == 2 else None
+        print(f"    顶点 {k} 色：Burnside = {b}" + (f"；暴力 = {o}" if o else ""))
+    print(f"    文中例13（3 色顶点）= 333 → {'一致' if burnside(perms,8,3)==333 else '不一致'}")
+    # 立方体的面：6 个面，用轴 ±x,±y,±z 表示；旋转作用在面上
+    faces = [(0, 1), (0, -1), (1, 1), (1, -1), (2, 1), (2, -1)]
+    fidx = {f: i for i, f in enumerate(faces)}
+    def face_img(m, f):
+        ax, sgn = f
+        v = [0, 0, 0]
+        v[ax] = sgn
+        w = apply(m, tuple(v))
+        aix = [i for i in range(3) if w[i] != 0][0]
+        return (aix, w[aix])
+    fperms = [tuple(fidx[face_img(m, f)] for f in faces) for m in rots]
+    for k in (2, 3):
+        print(f"    面 {k} 色：Burnside = {burnside(fperms, 6, k)}")
+    # 正四面体旋转群：24 个旋转中保持顶点集不变者
+    tet = [(1, 1, 1), (1, -1, -1), (-1, 1, -1), (-1, -1, 1)]
+    tset = set(tet)
+    trots = [m for m in rots if {apply(m, v) for v in tet} == tset]
+    print(f"\n  正四面体旋转群阶 = {len(trots)}（文中说 12）")
+    tidx = {v: i for i, v in enumerate(tet)}
+    tperms = [tuple(tidx[apply(m, v)] for v in tet) for m in trots]
+    for k in (2, 3):
+        print(f"    顶点 {k} 色：Burnside = {burnside(tperms, 4, k)}")
+    # 四面体的面：与顶点对偶，用「缺哪个顶点」标识
+    fperm = []
+    for m in trots:
+        row = []
+        for drop in range(4):
+            img = {apply(m, v) for v in tet if v != tet[drop]}
+            missing = list(tset - img)[0]
+            row.append(tidx[missing])
+        fperm.append(tuple(row))
+    for k in (2, 3):
+        print(f"    面 {k} 色：Burnside = {burnside(fperm, 4, k)}")
+    print(f"    文中例16（2 色顶点/面）= 5；习题2（2 色面）= 5 → 与上面一致")
+    print(f"    习题4（2 色面，立方体）= 10 → {'一致' if burnside(fperms,6,2)==10 else '不一致'}")
+
+
+# ---------------------------------------------------------------- 组 3
+def group3():
+    print()
+    print("=" * 76)
+    print("组 3 · 化学、图论、布尔函数：例14、例15、例17、3.7.1")
+    print("=" * 76)
+    # 二氯苯：D6 作用在 6 个位置，选 2 个放 Cl（等价于 2 色着色再按颜色分轨道）
+    n = 6
+    D = dihedral(n)
+    from itertools import combinations
+    subs = set(combinations(range(n), 2))
+    seen = set(); cnt = 0
+    for s in subs:
+        if s in seen:
+            continue
+        cnt += 1
+        for p in D:
+            img = tuple(sorted(p[i] for i in s))
+            seen.add(img)
+    print(f"  二氯苯（C6H4Cl2）：D6 作用在 2-子集上，轨道数 = {cnt}（文中 3）")
+    # 三氯苯
+    tri = set(combinations(range(n), 3))
+    seen = set(); c3 = 0
+    for s in tri:
+        if s in seen:
+            continue
+        c3 += 1
+        for p in D:
+            seen.add(tuple(sorted(p[i] for i in s)))
+    print(f"  三氯苯（C6H3Cl3）：轨道数 = {c3}（文中 3）")
+    # 3 顶点简单图：S3 作用在 3 条边上
+    edges = [(0, 1), (0, 2), (1, 2)]
+    eidx = {e: i for i, e in enumerate(edges)}
+    S3 = []
+    for perm in permutations(range(3)):
+        row = []
+        for (a, b) in edges:
+            e = tuple(sorted((perm[a], perm[b])))
+            row.append(eidx[e])
+        S3.append(tuple(row))
+    print(f"  3 顶点简单图：S3 作用在边集上，轨道数 = {orbit_count(S3, 3, 2)}（文中 4）")
+    # n=2 布尔函数：S2 作用在 4 个输入上，诱导作用在 16 个函数上
+    inputs = list(product((0, 1), repeat=2))
+    iidx = {x: i for i, x in enumerate(inputs)}
+    funcs = list(product((0, 1), repeat=4))
+    fidx = {f: i for i, f in enumerate(funcs)}
+    acts = []
+    for perm in permutations(range(2)):
+        row = []
+        for f in funcs:
+            nf = tuple(f[iidx[tuple(x[perm[j]] for j in range(2))]] for x in inputs)
+            row.append(fidx[nf])
+        acts.append(tuple(row))
+    print(f"  n=2 布尔函数：S2 作用，轨道数 = {orbits_on(acts, 16)}（文中 12）")
+    print(f"    交叉核对：Fix(e)=16、Fix((12))=2^3=8，(16+8)/2 = 12 ✓ 文中算术无误")
+    print()
+    print("  组 3 结论：二氯苯 3、三氯苯 3、3 顶点图 4、n=2 布尔函数 12 —— 全部与文中一致。")
+    print("  （注：例14 我最初误以为应为 10，实际重算确认 12 正确；教训是先算再断言。）")
+
+
+# ---------------------------------------------------------------- 组 4
+def group4():
+    print()
+    print("=" * 76)
+    print("组 4 · D_n 偶数情形的公式本身错在哪")
+    print("=" * 76)
+    print("  文中给出的偶数情形公式：")
+    print("      N = (1/2n) [ Σ_{t} k^gcd(n,t) + n·k^{n/2} ]")
+    print("  应有的公式（反射分两类，各 n/2 个）：")
+    print("      N = (1/2n) [ Σ_{t} k^gcd(n,t) + (n/2)·k^{n/2+1} + (n/2)·k^{n/2} ]")
+    print()
+    print("  n  | k | 文中公式 | 正确公式 | 真值(暴力) | 差")
+    print("  " + "-" * 56)
+    for n in (4, 6, 8, 10):
+        for k in (2, 3):
+            s = sum(k ** gcd(n, t) for t in range(n))
+            paper = (s + n * k ** (n // 2)) // (2 * n)
+            right = (s + (n // 2) * k ** (n // 2 + 1) + (n // 2) * k ** (n // 2)) // (2 * n)
+            truth = orbit_count(dihedral(n), n, k) if n <= 8 else None
+            t = f"{truth:>8d}" if truth is not None else "     —"
+            print(f"  {n:2d} | {k} | {paper:>8d} | {right:>8d} | {t} | {right-paper:>3d}")
+    print()
+    print("  ⟹ 差距随 k 迅速扩大：n=6 时 k=2 差 2、k=3 差 14；n=8,k=3 差 41；n=10,k=3 差 122。")
+    print("     在例12 的 k=2 情形下只差 2，不易被察觉；但公式是错的，换参数就爆。")
+    print("  同一处错误在二阶矩上也可见：偶数 n 时「固定点数」的均值多算/少算了 n·k^{n/2}/2。")
+
+
+# ---------------------------------------------------------------- 组 5
+def group5():
+    print()
+    print("=" * 76)
+    print("组 5 · 「共形群 CO(n)」是不是共形群")
+    print("=" * 76)
+    print("  文中 2.3.4 写：共形几何，共形群 CO(n) 保持角度。")
+    print("  但 CO(n) = R_{>0} · O(n)，即「正交 + 伸缩」，这正是文中 2.2 表里的「相似群」。")
+    print("  真正的共形群（Liouville 定理）：")
+    print("    Conf(R^n) ≅ O(1, n+1)（n ≥ 3），维数 (n+1)(n+2)/2；")
+    print("    n = 2 时 Conf 是无穷维（任意全纯/反全纯映射，含反演）。")
+    print()
+    print("  n | dim CO(n) = n(n-1)/2 + 1 | dim Conf(R^n) | 是否同一群")
+    print("  " + "-" * 52)
+    for n in (2, 3, 4):
+        dco = n * (n - 1) // 2 + 1
+        dconf = "∞" if n == 2 else str((n + 1) * (n + 2) // 2)
+        print(f"  {n} | {dco:>24d} | {dconf:>13s} | 否")
+    print()
+    print("  ⟹ CO(2) 是 2 维（旋转 + 缩放），Conf(R^2) 是无穷维。")
+    print("     n=3：CO(3) 4 维，Conf(R^3) 10 维。两者相差一个反演方向。")
+    print("  ⟹ 这一处不是笔误，是术语层面的实质错误：文中把「相似群」当了两次用，")
+    print("     共形几何那一栏就空着真正的群。")
+    print("  另注：2.2 表里「共形群（保角）」与「相似群（正交+伸缩）」并列出现，")
+    print("     同一群 CO(n) 被列给两种几何，是自相矛盾的同源证据。")
+
+
+if __name__ == "__main__":
+    group1()
+    group2()
+    group3()
+    group4()
+    group5()
+    print()
+    print("=" * 76)
+    print("汇总")
+    print("=" * 76)
+    print("  与文中一致：例11(14) 例13(333) 例14(12) 例15(3) 例16(5) 例17(4)")
+    print("              习题2(5) 习题4(10) 3.7.1(3)")
+    print("  与文中不一致：例12 → 真值 13，文中 11（错因在反射的循环结构）")
+    print("  术语错误：2.3.4 把 CO(n)（相似群）当作共形群")

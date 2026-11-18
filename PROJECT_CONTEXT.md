@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.9**（2026-11-18）
+- 当前版本：**v2.10**（2026-11-18）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、10 套 CI 测试。
 
@@ -36,7 +36,7 @@
 | `skills/math-doc-rigor/` | 数学文档严谨化：六查渲染体检 + 三层标注 + md→PDF 保真流水线 |
 | `docs/SOP.md` | 方法本体：七步流程、病灶库、实战档案、工程坑（340 行） |
 | `docs/ARCHITECTURE.md` | 架构决策与失败模式：每个决策后跟一句「不这么做会怎样」（244 行） |
-| `examples/` | 一份完整范例：读解正文 + 算据附录 + 可复算脚本 |
+| `examples/` | 两份完整范例（SwarmEvolve、群作用与计数）：读解正文 + 算据附录 + 可独立跑的脚本 |
 | `CHANGELOG.md` | 只记影响使用者的改动；对外发布自 v2.3 起算 |
 | `requirements.txt` | **只有一个依赖**：`requests>=2.31`（服务本身零框架） |
 | `Dockerfile` | python:3.12-slim + ffmpeg |
@@ -361,13 +361,20 @@ CI 跑 15 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **未做**：换多进程服务器 —— 信号量只能挡「并发任务」，挡不住「并发连接」
 - **文件**：`server/app.py`、`server/test_app.py`、`.env.example`、`README.md`、`docs/ARCHITECTURE.md`
 
+### 19. README 补真实例子，examples 扩到两份（v2.10）
+
+- **根因**：`examples/` 原只有 SwarmEvolve 一篇，那篇 20 条可核项 19 条都对，读起来像「核了一遍没什么问题」，展示不出方法能干什么
+- **新增**：《群作用与计数》三件套（读解 md / 附录 md / `verify_group_action.py`）—— 十处数值九对一错，错的那处可手算复现
+- **核验**：附录声明的源文件 md5 与脚本实际 md5 一致（`8db25676…`）；`examples/` 下直接 `python3 verify_group_action.py` 可跑通，输出与文档结论吻合
+- **README**：新增「一个真实例子」一节，含手算表（旋转 6 类 84 / 过对顶点轴 3×16 / 过对边中点轴 3×8，合计 13；按文中错法得 11）
+- **文件**：`README.md`、`examples/`（新增 3 个文件）
+
 ## 待办
 
 - **换多进程服务器**：并发任务已由 `Semaphore(MAX_CONCURRENT=8)` 挡住（v2.9），但信号量挡不住「并发连接」本身 —— 单进程仍是单点，公开部署前换 gunicorn/uvicorn（`docs/ARCHITECTURE.md` §三末）
 - **公开演示站**：需 Redis 限流（内存计数换 IP 即绕）、调低 `RATE_LIMIT_PER_HOUR`、服务端兜底 key
 - **M2 任务队列 + 结果持久化**：让读解结果有可分享的链接（需一台有 Redis 的机器）
 - **M3 核验原语扩充**：给 `safe_eval` 加 `det2` / `trace` / `frobenius_norm` / `pow_sum` 等固定原语，模型只能填参数不能写代码（路线 A，不引沙箱）
-- **README 开头补真实例子**：从 `examples/` 摘 20 行贴在「它凭什么不一样」之后，比任何描述直观
 - **`PROOFREAD_PROMPT` 收紧**：要求 `why` 里必须给上下文证据；若「需要回听」普遍偏软，说明判据还要再硬
 - **同一篇缓存**：URL + 正文哈希为键、24h，重复请求近零成本（`docs/ARCHITECTURE.md` §五降本第一步）
 
