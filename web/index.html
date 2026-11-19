@@ -230,7 +230,7 @@
   <div class="box">
     <input id="url" type="url" inputmode="url" autocapitalize="off" autocorrect="off"
            spellcheck="false" placeholder="请粘贴文章链接" autocomplete="off">
-    <button id="go">帮我看这篇</button>
+    <button id="go">帮我读解</button>
   </div>
 
   <details class="paste">
@@ -245,12 +245,12 @@
       上传视频/音频（可选，用于原声读解）
       <input id="file" type="file" accept="video/*,audio/*,.m4a,.mp3,.wav,.amr" hidden>
     </label>
-    <span class="hint" id="fname">从微信「保存视频」导出后传上来，就能从「元宝总结」升到「原声转录」。</span>
+    <span class="hint" id="fname">从微信「保存视频」导出后传上来。</span>
     <span class="hint" id="fprog"></span>
   </div>
 
   <details class="fold data" id="dataCard">
-    <summary>这次读解会产生什么数据</summary>
+    <summary>读解如何尊重你的隐私？</summary>
     <ul>
       <li><span class="tick">·</span><span><b>读解内容不记录。</b>没有日志，报告不存档，读完就散。</span></li>
       <li><span class="tick">·</span><span><b>没有账号，不记录浏览。</b>你不需要成为「用户」才能用。</span></li>
@@ -617,7 +617,7 @@ fetch("/api/health").then(r => r.json()).then(h => {
     $("err").textContent = "服务端尚未配置 LLM_API_KEY，只能抓取不能读解。";
   }
   if(!h.asr){
-    $("fname").textContent = "服务端未配置 ASR：上传后无法转写（仍可贴链接读元宝总结）。";
+    $("fname").textContent = "服务端未配置 ASR：上传的音视频无法转写。";
   }else if(!h.ffmpeg){
     $("fname").textContent = "服务端缺 ffmpeg：音视频都无法转写，请改用粘贴正文。";
   }

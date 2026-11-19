@@ -173,7 +173,7 @@ class TestHomeTheme(unittest.TestCase):
         """数据去向必须折叠，且默认收起 —— 首屏留给「能帮你做什么」。"""
         m = re.search(r'<details[^>]*class="[^"]*data[^"]*"[^>]*>(.{0,120})', self.html, re.S)
         self.assertTrue(m, "找不到数据去向折叠块")
-        self.assertIn("这次读解会产生什么数据", m.group(1))
+        self.assertIn("读解如何尊重你的隐私", m.group(1))
         self.assertNotIn(" open", m.group(0), "数据去向不该默认展开")
 
     def test_disclaimer_says_input_not_body(self):
