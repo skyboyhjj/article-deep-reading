@@ -276,7 +276,7 @@ class Handler(BaseHTTPRequestHandler):
                 "search_backend": search.describe(),
                 "ffmpeg": media.has_ffmpeg(),
                 "max_upload_mb": MAX_UPLOAD // 1024 // 1024,
-                "rate_limit_per_hour": RATE_LIMIT,
+                "rate_limit_per_hour": LIMITER.current_limit(),
                 "rate_limit_backend": type(LIMITER).__name__,
                 "max_concurrent": MAX_CONCURRENT,
             })
