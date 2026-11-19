@@ -76,11 +76,18 @@
   #fname{flex:1 1 260px;font-size:12.5px;line-height:1.6}
 
   .stages{display:flex;gap:6px;margin:28px 0 6px;flex-wrap:wrap}
+  /* 阶段标签：灰=没跑，绿=过了，橙=过了但有话说，红=断了。
+     字色按对比度选的，不是凭好看：#6f6f6f 在米白上 4.96、#94600f 在浅黄上 4.96，
+     都过 WCAG AA 4.5（原来的 #888 只有 3.5、#a86a12 只有 4.13）。 */
   .st{font-size:12.5px;padding:4px 10px;border-radius:20px;border:1px solid var(--line);
-      color:var(--muted);background:var(--card);white-space:nowrap}
-  .st.run{border-color:#b9c9c0;color:var(--accent);background:#eef4f0}
+      color:#6f6f6f;background:var(--card);white-space:nowrap}
+  /* 进行中与完成态底色几乎同色（RGB 距离 3.6），靠呼吸动效区分，不靠继续调色 */
+  .st.run{border-color:#b9c9c0;color:var(--accent);background:#eef4f0;
+          animation:stpulse 1.2s ease-in-out infinite}
+  @keyframes stpulse{0%,100%{opacity:1}50%{opacity:.62}}
+  @media (prefers-reduced-motion: reduce){ .st.run{animation:none} }
   .st.ok{border-color:#b7d3c4;color:var(--ok);background:#eef7f2}
-  .st.warn{border-color:#e2cfa6;color:var(--warn);background:#fdf6e9}
+  .st.warn{border-color:#e2cfa6;color:#94600f;background:#fdf6e9}
   .st.fail{border-color:#e0b6b6;color:var(--fail);background:#fbeeee}
   .log{font-size:13px;color:var(--muted);margin:10px 0 0;min-height:20px}
 

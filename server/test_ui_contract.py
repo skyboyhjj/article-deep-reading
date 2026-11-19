@@ -28,6 +28,26 @@ ENGINE_ONLY = {"done", "quota", "error"}
 KNOWN_STATUS = {"run", "ok", "warn", "fail", "info"}
 
 
+def _rgb(h: str) -> tuple:
+    h = h.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _luminance(c: tuple) -> float:
+    f = lambda v: (v / 255 / 12.92) if v / 255 <= 0.03928 else ((v / 255 + 0.055) / 1.055) ** 2.4
+    r, g, b = c
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+
+
+def contrast_ratio(fg: str, bg: str) -> float:
+    """WCAG 对比度。小号文字（<18.66px 粗体 / <24px）要求 ≥ 4.5。"""
+    la, lb = _luminance(_rgb(fg)), _luminance(_rgb(bg))
+    hi, lo = max(la, lb), min(la, lb)
+    return round((hi + 0.05) / (lo + 0.05), 2)
+
+
 def _constants(node) -> list[str]:
     """把字面量或三元表达式里能确定的分支都取出来。
 
@@ -198,6 +218,52 @@ class TestHomeTheme(unittest.TestCase):
         m = re.search(r"function resetStages\(\)\{(.{0,200})", self.html, re.S)
         self.assertTrue(m, "找不到 resetStages")
         self.assertIn('$("stages").style.display', m.group(1), "resetStages 没显示阶段条")
+
+    # ---- 阶段标签的配色对比度（v2.22）----
+    def _var(self, name):
+        m = re.search(r"--" + re.escape(name) + r"\s*:\s*(#[0-9a-fA-F]{3,6})", self.html)
+        return m.group(1) if m else None
+
+    def _rule(self, selector):
+        """取选择器的 color 与 background，支持 var(--x)。"""
+        m = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", self.html)
+        if not m:
+            return {}
+        body = m.group(1)
+        out = {}
+        for prop in ("color", "background"):
+            # 前置断言避免把 border-color 当成 color
+            mm = re.search(r"(?<![-\w])" + prop + r"\s*:\s*(#[0-9a-fA-F]{3,6}|var\(--[\w-]+\))", body)
+            if not mm:
+                continue
+            v = mm.group(1)
+            if v.startswith("var("):
+                v = self._var(v[6:-1])
+            if v:
+                out[prop] = v
+        return out
+
+    def test_stage_colors_meet_wcag(self):
+        """五态文字对比度都得过 AA 4.5。
+
+        原稿两处不达标：未跑态 #888 只有 3.5、warn 态 #a86a12 只有 4.13 ——
+        而 warn 恰恰是「跑完但有话说」，最该看清的一档。
+        """
+        for sel in (".st", ".st.run", ".st.ok", ".st.warn", ".st.fail"):
+            r = self._rule(sel)
+            self.assertIn("color", r, f"{sel} 取不到文字色")
+            self.assertIn("background", r, f"{sel} 取不到底色")
+            ratio = contrast_ratio(r["color"], r["background"])
+            self.assertGreaterEqual(
+                ratio, 4.5, f"{sel} 对比度 {ratio} < 4.5（{r['color']} on {r['background']}）")
+
+    def test_stage_run_distinguished_by_motion(self):
+        """进行中与完成态底色只差 RGB 3.6，必须有动效或别的区分手段。"""
+        m = re.search(r"\.st\.run\s*\{([^}]*)\}", self.html)
+        self.assertTrue(m, "找不到 .st.run")
+        self.assertIn("animation", m.group(1), "运行态没有动效，与完成态几乎同色")
+        self.assertRegex(self.html, r"@keyframes\s+stpulse")
+        self.assertIn("prefers-reduced-motion", self.html, "动效缺少减少动态的降级")
 
 
 if __name__ == "__main__":
