@@ -360,7 +360,9 @@ article-deep-reading/
 ├── examples/                   ← 两份完整范例：读解 + 算据附录 + 可独立跑的脚本
 └── docs/
     ├── SOP.md                  ← 方法本体：七步流程与踩坑清单
-    └── ARCHITECTURE.md         ← 架构决策、失败模式、成本、扩展路线
+    ├── ARCHITECTURE.md         ← 架构决策、失败模式、成本、扩展路线
+    ├── TESTING.md              ← 测试说明：17 套逐条、核对清单、三个反向实验
+    └── RATE_LIMITING.md        ← 限流与额度：滑动窗口、Retry-After、热配置运维
 ```
 
 `skills/` 与 `server/` 是**同一套方法的两副形态**：前者给平台内的助手用，后者给人用。
@@ -452,7 +454,7 @@ $env:INSECURE_TLS="1"
 
 - **服务端不执行模型生成的任意代码**。所有表达式经白名单 AST 求值：只允许算术与少数初等函数，拒绝属性访问、下标、推导式、lambda、导入，幂指数有上限，结果须为有限实数。攻击用例见 `server/test_safe_eval.py`。
 - **API key 只在服务端**。前端永不接触；`/api/health` 只返回「是否已配置」。
-- **限流在内存里**，够单机用。公开部署请换 Redis 并加 IP 维度之外的策略（否则换 IP 即可绕过）。
+- **限流默认在进程内存**（`REDIS_URL` 为空时，单机够用）；多副本必须配 Redis。Redis 模式是滑动窗口（ZSET + Lua 原子判定），429 带 `Retry-After`，额度可用 `dr:cfg:limit` 热调，细节见 [`docs/RATE_LIMITING.md`](./docs/RATE_LIMITING.md)。限流只按 IP，换 IP 仍可绕过，公开部署还需要叠加其他维度。
 - 未经授权大量抓取第三方站点可能违反其条款，请自行评估。
 
 ---
@@ -466,6 +468,7 @@ $env:INSECURE_TLS="1"
 | [docs/SOP.md](./docs/SOP.md) | 读解方法本体：七步流程、病灶库、实战档案 |
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | 架构决策与失败模式：每个决策后跟一句「不这么做会怎样」 |
 | [docs/TESTING.md](./docs/TESTING.md) | 测试说明：17 套测试逐条、核对清单、三个反向实验 |
+| [docs/RATE_LIMITING.md](./docs/RATE_LIMITING.md) | 限流与额度：滑动窗口、Retry-After、热配置 `dr:cfg:limit` 的运维手册 |
 | [CHANGELOG.md](./CHANGELOG.md) | 变更记录，只记使用者能感觉到的改动 |
 
 ---

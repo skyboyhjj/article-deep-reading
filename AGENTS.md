@@ -18,6 +18,7 @@
 | 改抓取（微信 / 视频号 / arXiv / 通用） | `docs/ARCHITECTURE.md` §三失败模式 + `README.md`「支持哪些链接」 |
 | 改 ASR / 语音画像 | `README.md` 对应两节 + `.env.example` 注释（**接口硬约束写在注释里**） |
 | 改前端 | `web/index.html`（单文件，无构建，改完手机窄屏要看一眼） |
+| 改限流 / 额度 / 429 提示 | `docs/RATE_LIMITING.md`（方案 + 运维命令，含 `dr:cfg:limit` 热配置）+ `server/ratelimit.py` 顶部注释 |
 | 改 `skills/` 下脚本 | 该技能的 `SKILL.md` + `docs/SOP.md` §3 |
 | 写数学 / 理论物理文档 | `skills/math-doc-rigor/SKILL.md` + `references/render-rules.md` |
 
@@ -39,8 +40,9 @@
 - [ ] 改了使用者能感觉到的行为 → `CHANGELOG.md`
 - [ ] 改了判定规则 → `docs/ARCHITECTURE.md` 对应决策（含「不这么做会怎样」）
 - [ ] 改了端点 / 环境变量 → `README.md` 变量表 + `.env.example` + `PROJECT_CONTEXT.md`「API 架构」
+- [ ] 改了限流 / 额度口径 → 跑 `test_ratelimit` 全套 + `docs/RATE_LIMITING.md` 与 429 文案、`/api/health` 三处口径一致
 - [ ] 新增或改动了文档 → 过 `selfcheck_md.py` 与 `check_md.py`，退出码 0
-- [ ] 推 `main` 后看 CI：10 套全绿才算完
+- [ ] 推 `main` 后看 CI：17 套全绿才算完
 
 ---
 
