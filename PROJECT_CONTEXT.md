@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.17**（2026-11-18）
+- 当前版本：**v2.19**（2026-11-19）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、17 套 CI 测试。
 
@@ -436,6 +436,29 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **测试中发现**：模型自造判定（如「存疑」）被旧实现静默丢弃，导致「可核 5 条」而分项只加得 4 条 —— 补「判定不明」一档并加断言守门
 - **测试**：`test_pipeline_e2e` 8 → 20 项；`test_ui_contract` 7 → 11 项；两处均做了反向验证
 - **文件**：`server/pipeline.py`、`web/index.html`、`server/test_pipeline_e2e.py`、`server/test_ui_contract.py`、`docs/ARCHITECTURE.md`（决策 8）、`docs/TESTING.md`
+
+### 27. 镜像 ffmpeg 改静态二进制（v2.18）
+
+- **起因**：线上 `ffmpeg:false` —— apt 装 ffmpeg 会拉一整条依赖链，构建时网络受限或层被缓存跳过时容易静默缺失
+- **改法**：`Dockerfile` 用 `mwader/static-ffmpeg:7.1` 多阶段 COPY，只取 `/ffmpeg`、`/ffprobe` 两个静态二进制，无 glibc 依赖
+- **验证**：线上 `/api/health` 由 `ffmpeg:false` 变为 `ffmpeg:true`，上传返回 `duration`（ffprobe 生效）
+- **文件**：`Dockerfile`
+
+### 28. 限流改滑动窗口 + Retry-After + 额度热配置（v2.18）
+
+- **起因**：固定窗口（`INCR` + 首次 `EXPIRE 3600`）打满后必须硬等「首次请求 + 1 小时」整点恢复，用户既不知还要等多久，也只能反复重试碰运气
+- **改法**：每个 IP 一个 ZSET（score = 时间戳），一段 Lua 原子脚本完成「清窗口外 → 记本次 → `ZCARD` → 超限则回滚并返回最早一笔的剩余窗口」；`allow()` 升级为四元组 `(放行, 剩余, 状态, 恢复秒数)`；429 带 `Retry-After` 头与 `retry_in_seconds` 字段；新增热配置 `dr:cfg:limit`（`_resolve_limit()` 本地缓存 5 秒，读不到就用构造值，不 fail closed）
+- **验证**：52 项 unittest 通过（含 `test_sliding_window_recovers_gradually`、`test_retry_after_is_oldest_remaining`、`test_hot_config_override`）；线上连发 4 次 200（剩余 3→0）后第 5 次 429，`retry-after: 3598`、`retry_in_seconds: 3598`；75 秒后重测降为 3506，证明基准是最早一笔而非整点
+- **已知不足**：`/api/health` 的 `rate_limit_per_hour` 仍返回构造值 `RATE_LIMIT`，热配置改额度后 health 会报旧数字（429 文案已用 `current_limit()`，两处口径不一致）
+- **文件**：`server/ratelimit.py`、`server/app.py`、`web/index.html`、`server/test_ratelimit.py`、`server/test_app.py`
+
+### 29. 修 v2.17 简约版三处缺陷（v2.19）
+
+- **起因**：线上实测（8 秒英文语音）发现简约版能出但不可用 —— 条目引文为空（渲染成「-  —— 半对」）、「半对」配「无需修改」、两条引用逐字无误的转录被判「问题不少（2/3）」
+- **根因**：`verify` 的 items 无 `quote` 字段（提示词里就没有），简约版直接读 `it["quote"]`，而详细版是按 `n` 从 `triage.claims` 取的；降级时 fix 用精确匹配，不认「无需修改（…）」；降级半对与实质半对混算
+- **改法**：`render_brief` 加 `_q()` 回填；新增 `_no_change_fix()` 前缀判定；`_count_verdicts` 加「降级」档，结论与统计改用 `不实 + 半对 − 降级`；有降级或未核时不再说「都站得住」
+- **测试**：`test_pipeline_e2e` 20 → 24 项，四条新断言均做了反向验证
+- **文件**：`server/pipeline.py`、`server/test_pipeline_e2e.py`
 
 ## 待办
 

@@ -117,6 +117,24 @@ def _brief_checks() -> list[tuple[str, bool]]:
     total = cw["确证"] + cw["不实"] + cw["半对"] + cw["未核"] + cw["其他"]
     b_weird = pipeline.render_brief("u", doc, TRIAGE, weird, empty, "")
 
+    # v2.19：verify 的 items 由模型产出，提示词里没有 quote 字段 —— 引文只能按 n
+    # 从 triage.claims 回填。不填就会渲染出「-  —— 半对」这种没有对象的残行。
+    no_quote = {"items": [
+        {"n": 1, "verdict": "不实", "evidence": "原文无据", "fix": "改为估算"},
+    ]}
+    b_noq = pipeline.render_brief("u", doc, TRIAGE, no_quote, empty, "")
+
+    # v2.19：确证被降级成半对（引文一致、只是没有外部出处）≠ 说法本身半对。
+    # 两者混算，一份引用逐字无误的转录会被判「问题不少」。
+    demoted = {"items": [
+        {"n": 1, "verdict": "确证", "sources": [], "evidence": "原文首句逐字一致",
+         "fix": "无需修改（引用与原文一致）"},
+        {"n": 2, "verdict": "确证", "sources": [], "evidence": "原文次句逐字一致",
+         "fix": "无需修改（引用与原文一致）"},
+    ]}
+    pipeline.enforce_evidence(demoted["items"])
+    b_dem = pipeline.render_brief("u", doc, TRIAGE, demoted, empty, "")
+
     return [
         ("未知判定不被静默丢弃", cw["其他"] == 1),
         ("分项之和恒等于可核条数", total == cw["n"] == 5),
@@ -129,6 +147,10 @@ def _brief_checks() -> list[tuple[str, bool]]:
         ("详细版仍保留核验表", "| 判定 |" in full),
         ("全确证时结论说「都站得住」", "都站得住" in b_ok),
         ("多数不实时结论说「问题不少」", "问题不少" in b_bad),
+        ("引文按 n 从 claims 回填", "- 效率提升一百倍" in b_noq),
+        ("降级项不计入问题数", "没有发现明显错误" in b_dem and "问题不少" not in b_dem),
+        ("降级项给出「出处不足」而非「有问题」", "出处不足 2" in b_dem),
+        ("降级项的 fix 不再写「无需修改」", "无需修改" not in b_dem),
     ]
 
 

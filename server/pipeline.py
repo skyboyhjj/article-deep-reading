@@ -518,6 +518,17 @@ def _media_only_evidence(evidence: str) -> list:
     return hosts
 
 
+def _no_change_fix(fix) -> bool:
+    """这条 fix 是不是「不用改」。
+
+    模型写「无需修改」，也常写「无需修改（引用与原文一致）」。后者同样是不用改，
+    若降级「确证 → 半对」时按精确匹配只认前者，就会留下
+    「半对：无需修改（引用与原文一致）」这种自相矛盾的行。v2.19 改成前缀判定。
+    """
+    s = str(fix or "").strip()
+    return (not s) or s.startswith("无需修改") or s.startswith("无需改")
+
+
 def enforce_evidence(items: list) -> int:
     """判「确证」却拿不出外部证据的，一律降级 —— 这道闸不放在 trace 里，
     因为 trace 只处理「未核」项，而「确证」往往在更早的核验阶段就产生了。"""
@@ -549,8 +560,8 @@ def enforce_evidence(items: list) -> int:
         missing = it.get("_cites_missing") or []
         if missing:
             it["verdict"] = "半对"
-            it["fix"] = (it.get("fix") if it.get("fix") not in ("无需修改", None)
-                         else "补一条可点开的出处后再定论")
+            it["fix"] = ("补一条可点开的出处后再定论"
+                         if _no_change_fix(it.get("fix")) else it.get("fix"))
             it["evidence"] = (ev.rstrip("。") +
                               f"。（已降级：援引的 {'、'.join(missing)} 不在本轮检索结果里，"
                               "来源无法点开核对，可能是模型自带的知识）")
@@ -560,8 +571,8 @@ def enforce_evidence(items: list) -> int:
         bad_labels = _media_only_evidence(ev)
         if bad_labels:
             it["verdict"] = "半对"
-            it["fix"] = (it.get("fix") if it.get("fix") not in ("无需修改", None)
-                         else "补一手来源（官网/年报/标准/论文）后再定论")
+            it["fix"] = ("补一手来源（官网/年报/标准/论文）后再定论"
+                         if _no_change_fix(it.get("fix")) else it.get("fix"))
             it["evidence"] = (ev.rstrip("。") +
                               f"。（已降级：依据援引的 {'、'.join(bad_labels[:2])} "
                               "均非一手来源，属媒体转述，支撑不了确证）")
@@ -580,15 +591,15 @@ def enforce_evidence(items: list) -> int:
                 demoted += 1
             else:
                 it["verdict"] = "半对"
-                it["fix"] = (it.get("fix") if it.get("fix") not in ("无需修改", None)
-                             else "补权威出处后再定论")
+                it["fix"] = ("补权威出处后再定论"
+                             if _no_change_fix(it.get("fix")) else it.get("fix"))
                 it["evidence"] = (ev.rstrip("。") + "。（已降级：判定确证但未落到任何外部来源）")
                 demoted += 1
             continue
         if "权威" not in tier:
             it["verdict"] = "半对"
-            it["fix"] = (it.get("fix") if it.get("fix") not in ("无需修改", None)
-                         else "补权威出处后再定论")
+            it["fix"] = ("补权威出处后再定论"
+                         if _no_change_fix(it.get("fix")) else it.get("fix"))
             it["evidence"] = (ev.rstrip("。") +
                               "。（已降级：所列来源均非权威，仅能说明「有多处相同说法」，不能算确证）")
             demoted += 1
@@ -1273,11 +1284,17 @@ def _count_verdicts(verify: dict, calc: dict) -> dict:
     """统计判定分布。简约版里的每个数字都出自这里，不经模型。"""
     items = [it for it in (verify.get("items") or [])
              if isinstance(it, dict) and it.get("verdict")]
-    c = {"n": len(items), "确证": 0, "不实": 0, "半对": 0, "未核": 0, "其他": 0}
+    c = {"n": len(items), "确证": 0, "不实": 0, "半对": 0, "未核": 0, "其他": 0,
+         "降级": 0}
     for it in items:
         v = str(it["verdict"]).strip()
         if v in ("确证", "不实", "半对", "未核"):
             c[v] += 1
+            # 「确证被降级成半对」与「说法本身只有一半对」不是一回事：
+            # 前者的意思是「引文与原文一致，只是拿不出外部出处」。两者混算，
+            # 一份引用逐字无误的转录也会被判「问题不少（2/3）」。v2.19 分开。
+            if v == "半对" and "已降级" in str(it.get("evidence") or ""):
+                c["降级"] += 1
         else:
             c["其他"] += 1     # 模型偶尔自造判定（如「存疑」）。旧实现直接丢掉，
                                # 于是「可核 5 条」而分项只加得 4 条 —— 数字自己打架。
@@ -1294,10 +1311,12 @@ def _brief_verdict_line(c: dict) -> str:
     if n == 0:
         return ("**没列到可核项** —— 可能通篇是观点，也可能正文没抓全。"
                 "先确认原文完整，再决定这份报告值不值得看。")
-    bad = c["不实"] + c["半对"]
+    bad = c["不实"] + c["半对"] - c.get("降级", 0)
     other = c.get("其他", 0)
     if bad == 0 and other == 0:
-        head = f"**核到的 {n} 条都站得住**"
+        # 有降级项或未核项时不说「都站得住」—— 它们没被证伪，但也没被证实。
+        head = (f"**{n} 条里没有发现明显错误**" if (c.get("降级") or c["未核"])
+                else f"**核到的 {n} 条都站得住**")
     elif bad / n <= 0.3:
         head = (f"**大体可核，{bad} 处需要改**" if bad
                 else f"**大体可核，但有 {other} 条判定不明**")
@@ -1308,6 +1327,8 @@ def _brief_verdict_line(c: dict) -> str:
         tails.append(f"另有 {c['不符']} 处实算与原文声称不符")
     if other:
         tails.append(f"{other} 条判定不明")
+    if c.get("降级"):
+        tails.append(f"{c['降级']} 条引文与原文一致，但找不到外部出处")
     if c["未核"]:
         tails.append(f"{c['未核']} 条查不到出处（是没核，不是没问题）")
     return head + ("；" + "；".join(tails) if tails else "") + "。"
@@ -1322,6 +1343,20 @@ def render_brief(url: str, doc: dict, triage: dict, verify: dict,
     和「判断的依据」堆在同一屏，读者多半只看前者，而前者恰恰最需要被核对。
     """
     c = _count_verdicts(verify, calc)
+    claims = triage.get("claims") or []
+
+    def _q(it: dict) -> str:
+        """条目引文。verify 的 items 是模型产出，而提示词里压根没有 quote 字段 ——
+        真实引文在 triage.claims 里，必须按 n 回填。否则简约版会渲染出
+        「-  —— 半对」这种只有判定、没有对象的残行。v2.19 修。"""
+        q = str(it.get("quote") or "").strip()
+        if q:
+            return q
+        n = it.get("n")
+        if isinstance(n, int) and 1 <= n <= len(claims):
+            return str(claims[n - 1].get("quote") or "").strip()
+        return ""
+
     L = [f"# {doc.get('title') or url}\n"]
 
     L.append(_brief_verdict_line(c))
@@ -1330,8 +1365,11 @@ def render_brief(url: str, doc: dict, triage: dict, verify: dict,
     stat = [f"可核 {c['n']} 条"]
     if c["确证"]:
         stat.append(f"有出处 {c['确证']}")
-    if c["不实"] + c["半对"]:
-        stat.append(f"有问题 {c['不实'] + c['半对']}")
+    hard = c["不实"] + c["半对"] - c.get("降级", 0)
+    if hard:
+        stat.append(f"有问题 {hard}")
+    if c.get("降级"):
+        stat.append(f"出处不足 {c['降级']}")
     if c["未核"]:
         stat.append(f"查不到 {c['未核']}")
     if c.get("其他"):
@@ -1351,7 +1389,7 @@ def render_brief(url: str, doc: dict, triage: dict, verify: dict,
     if oks:
         L.append("## 站得住的部分")
         for it in oks:
-            q = _trim(it.get("quote", ""), 60)
+            q = _trim(_q(it), 60)
             ev = _trim(it.get("evidence", ""), 46)
             L.append(f"- {q}" + (f"（依据：{ev}）" if ev else ""))
         L.append("")
@@ -1361,9 +1399,13 @@ def render_brief(url: str, doc: dict, triage: dict, verify: dict,
     L.append("## 需要改的地方")
     if bads:
         for it in bads[:BRIEF_MAX]:
-            q = _trim(it.get("quote", ""), 60)
+            q = _trim(_q(it), 60)
             fix = _trim(it.get("fix", ""), 40)
-            ev = _trim(it.get("evidence", ""), 46)
+            raw_ev = str(it.get("evidence") or "")
+            # 降级项的 evidence 把原因写在末尾，按 46 字截断正好把原因截掉 ——
+            # 读者只看到「原文逐字一致」却判半对，比不写依据更费解。
+            ev = ("引文与原文一致，但找不到外部出处" if "已降级" in raw_ev
+                  else _trim(raw_ev, 46))
             line = f"- {q} —— **{it.get('verdict')}**"
             if fix:
                 line += f"：{fix}"
