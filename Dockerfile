@@ -1,9 +1,11 @@
+# 用静态 ffmpeg 构建（无 glibc 依赖，跨发行版可用；避免 apt 拉 ffmpeg 依赖链过重/网络受限）
+FROM mwader/static-ffmpeg:7.1 AS ffmpeg
+
 FROM python:3.12-slim
 
-# ffmpeg 用于抽音轨/切片；不装的话只能直传纯音频
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+# 从静态镜像复制 ffmpeg/ffprobe
+COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
+COPY --from=ffmpeg /ffprobe /usr/local/bin/ffprobe
 
 WORKDIR /app
 
