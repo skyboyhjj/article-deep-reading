@@ -189,6 +189,21 @@ class TestHomeTheme(unittest.TestCase):
         self.assertIn("你好呀，我是慧惠", self.html)
         self.assertIn("我只读一遍，不留一片垃圾", self.html)
 
+    def test_hero_states_the_role(self):
+        """一句话说清「我是谁、我为你做什么」。"""
+        self.assertIn("你的数据环保卫士", self.html)
+
+    def test_primary_button_names_the_actor(self):
+        """按钮主语是慧惠，不是含糊的「帮我」。"""
+        m = re.search(r'<button id="go">([^<]*)</button>', self.html)
+        self.assertTrue(m, "找不到主按钮")
+        self.assertEqual(m.group(1).strip(), "慧惠读解")
+
+    def test_upload_area_says_why(self):
+        """上传区要交代用途（原声读解），而不是只放一个按钮。"""
+        self.assertIn("或原声读解", self.html)
+        self.assertNotIn("从微信「保存视频」导出后传上来", self.html)
+
     def test_data_card_is_collapsed(self):
         """数据去向必须折叠，且默认收起 —— 首屏留给「能帮你做什么」。"""
         m = re.search(r'<details[^>]*class="[^"]*data[^"]*"[^>]*>(.{0,120})', self.html, re.S)
