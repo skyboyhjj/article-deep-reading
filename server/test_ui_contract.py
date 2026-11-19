@@ -192,6 +192,13 @@ class TestHomeTheme(unittest.TestCase):
         self.assertIn("hui-skill.org/ethics", self.html)
         self.assertNotIn("四条铁律", self.html)
 
+    def test_stages_hidden_until_run(self):
+        """阶段条初始不显示：第一次来的人不该先面对七个陌生标签。"""
+        self.assertRegex(self.html, r'id="stages"[^>]*style="[^"]*display:\s*none')
+        m = re.search(r"function resetStages\(\)\{(.{0,200})", self.html, re.S)
+        self.assertTrue(m, "找不到 resetStages")
+        self.assertIn('$("stages").style.display', m.group(1), "resetStages 没显示阶段条")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -262,7 +262,7 @@
     </div>
   </details>
 
-  <div class="stages" id="stages">
+  <div class="stages" id="stages" style="display:none">
     <span class="st" data-s="extract">抓取</span>
     <span class="st" data-s="transcribe">转写</span>
     <span class="st" data-s="triage">定性</span>
@@ -315,6 +315,8 @@ function setStage(s, cls){
 }
 
 function resetStages(){
+  // 阶段条初始隐藏：第一次来的人不该先面对七个陌生标签，等真跑起来再出现
+  $("stages").style.display = "flex";
   document.querySelectorAll(".st").forEach(el => { el.className = "st"; });
   $("log").textContent = "";
   $("err").textContent = "";

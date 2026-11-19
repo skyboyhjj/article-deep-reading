@@ -101,7 +101,7 @@
 | 1 | `test_safe_eval.py` | 求值器 35 项：12 正确 + 18 攻击 + 5 失败 —— **绕过即阻断** |
 | 2 | `test_app.py` | HTTP 层 46 项：真起服务打真请求 —— 路由、health 不泄 key、analyze 八条校验、超限后同连接不被污染、SSE 形状与临时件清理、上传六种情形、限流窗口、并发额度（503 与归还）、上传件 TTL 清扫 6 项、删除接口 5 项 |
 | 3 | `test_ratelimit.py` | 限流器 20 项：滑动窗口逐笔恢复、Retry-After 取最早一笔、热配置覆盖、键为哈希不含明文 IP、三态（ok/exceeded/unavailable）、故障即 unavailable、熔断与恢复、按 REDIS_URL 选实现 |
-| 4 | `test_ui_contract.py` | 前后端契约 16 项：stage 集合双向核对、LABEL 一致、每阶段必须有结束态、done 必带 md 与 brief、三档 tab 与容器接线、首页主题五条（hero / 数据卡折叠 / 免责声明用「输入内容」/ 删除按钮接线 / 伦理页入口） |
+| 4 | `test_ui_contract.py` | 前后端契约 17 项：stage 集合双向核对、LABEL 一致、每阶段必须有结束态、done 必带 md 与 brief、三档 tab 与容器接线、首页主题五条（hero / 数据卡折叠 / 免责声明用「输入内容」/ 删除按钮接线 / 伦理页入口 / 阶段条初始隐藏） |
 | 5 | `test_extract.py` | 抓取层 11 项：`FETCH_BACKEND` 三档与未设置、通用网页、公众号 `pre` 不粘连、公式还原、UTC+8、回退 DeepSeek |
 | 6 | `test_pipeline_e2e.py` | 五阶段数据流（假模型替身）+ 报告头三查 + 分层六查（先说可信部分、AI 身份、更短、不含表格）+ 引文回填与降级口径 + 免责声明用「输入内容」，25 项 |
 | 7 | `test_video.py` | 视频号路径与 L1 二手标注 |
