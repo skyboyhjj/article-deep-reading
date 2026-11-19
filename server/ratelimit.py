@@ -21,6 +21,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import threading
 import time
@@ -32,6 +33,14 @@ COOLDOWN = 30
 # 额度热配置：运维 SET dr:cfg:limit N 即时生效，无需重启；本地缓存 CONFIG_TTL 秒
 CONFIG_KEY = "dr:cfg:limit"
 CONFIG_TTL = 5.0
+# 键里的 IP 一律先哈希：Redis 里不该留明文地址。换盐 = 旧键全部作废，
+# 效果等同于「全员额度重置」，这一点写进 docs/RATE_LIMITING.md 的运维须知。
+RL_SALT = os.environ.get("RL_SALT", "deepread-v1")
+
+
+def _hash_ip(ip: str) -> str:
+    """IP → 不可反推的稳定键。同一 IP 同键（限流才有效），不同 IP 不同键。"""
+    return hashlib.sha256((RL_SALT + str(ip)).encode()).hexdigest()[:32]
 
 
 class RateLimiterError(RuntimeError):
@@ -57,14 +66,15 @@ class MemoryRateLimiter:
 
     def allow(self, ip: str) -> tuple[bool, int, str, float | None]:
         now = _now()
+        k = _hash_ip(ip)        # 内存里也不留明文 IP（崩溃转储、调试打印都可能带出来）
         with self._lock:
-            hits = [t for t in self._hits.get(ip, []) if now - t < self.window]
+            hits = [t for t in self._hits.get(k, []) if now - t < self.window]
             if len(hits) >= self.limit:
-                self._hits[ip] = hits
+                self._hits[k] = hits
                 retry = (hits[0] + self.window - now) if hits else self.window
                 return False, 0, "exceeded", retry
             hits.append(now)
-            self._hits[ip] = hits
+            self._hits[k] = hits
             return True, self.limit - len(hits), "ok", None
 
     def current_limit(self) -> int:
@@ -166,7 +176,7 @@ return {1, limit - count, 0}
         if self._tripped():
             return False, 0, "unavailable", None
         now = _now()
-        key = f"{self.prefix}{ip}"
+        key = f"{self.prefix}{_hash_ip(ip)}"
         limit = self._resolve_limit()
         member = f"{now:.6f}:{uuid.uuid4().hex}"
         try:

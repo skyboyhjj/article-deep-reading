@@ -19,6 +19,7 @@ import os
 import socket
 import tempfile
 import threading
+import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -70,6 +71,31 @@ ALLOWED_EXT = {".mp4", ".mov", ".m4v", ".m4a", ".mp3", ".wav", ".aac",
                ".flac", ".webm", ".mkv", ".ogg", ".amr", ".opus", ".silk"}
 MAX_UPLOAD = int(os.environ.get("MAX_UPLOAD_MB", "300")) * 1024 * 1024
 CHUNK = 256 * 1024
+# 上传件的保留期。分析结束会立刻删；这条是兜底 —— 上传后没点「开始读解」的，
+# 最多留这么久。见 _sweep_uploads()。
+UPLOAD_TTL = int(os.environ.get("UPLOAD_TTL_HOURS", "24")) * 3600
+
+
+def _sweep_uploads(now: float | None = None) -> int:
+    """删掉超过 UPLOAD_TTL 的上传件，返回删除个数。
+
+    惰性清扫：每次上传前跑一次，不起后台线程。多副本各自扫自己的 /tmp，互不干扰；
+    没有上传活动时也不会有堆积 —— 因为写入前必扫。
+    """
+    now = time.time() if now is None else now
+    n = 0
+    try:
+        entries = list(UPLOAD_DIR.iterdir())
+    except OSError:          # 目录还不存在（首次运行）
+        return 0
+    for f in entries:
+        try:
+            if f.is_file() and now - f.stat().st_mtime > UPLOAD_TTL:
+                f.unlink(missing_ok=True)
+                n += 1
+        except OSError:      # 单个别文件删不掉（权限/竞态）不该影响整体清扫
+            pass
+    return n
 
 # 限流：内存（单机/开发）或 Redis（多副本部署），由 REDIS_URL 决定。
 # 注意「没配 Redis」是模式，「Redis 连不上」是故障 —— 后者 fail closed 回 503。
@@ -227,6 +253,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._exceeded(retry_after)
             return
 
+        _sweep_uploads()        # 惰性清扫：趁这次上传顺手清掉过期的，不额外起线程
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         uid = uuid.uuid4().hex[:16]
         dst = UPLOAD_DIR / f"{uid}__{name}"
@@ -255,6 +282,37 @@ class Handler(BaseHTTPRequestHandler):
             "asr": asr.describe(),
             "remaining": left,
         })
+
+    def _handle_drop(self) -> None:
+        """删掉一个上传件。幂等：文件本来就不在，也回 200（removed: 0）。
+
+        为什么不消耗额度：删除是收尾动作，收费会让人宁可留着不删。
+        为什么不占并发槽：删一个文件是毫秒级操作，占槽只会白白挤掉分析任务。
+        """
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = 0
+        if n <= 0 or n > 4096:
+            self._json(400, {"error": "请求体缺失或过大"})
+            return
+        try:
+            payload = json.loads(self.rfile.read(n) or b"{}")
+        except json.JSONDecodeError:
+            self._json(400, {"error": "JSON 解析失败"})
+            return
+        uid = str(payload.get("id", "")).strip()
+        if not (uid.isalnum() and len(uid) == 16):
+            self._json(400, {"error": "upload id 非法"})
+            return
+        removed = 0
+        for f in sorted(UPLOAD_DIR.glob(f"{uid}__*")):
+            try:
+                f.unlink(missing_ok=True)
+                removed += 1
+            except OSError:
+                pass
+        self._json(200, {"removed": removed})
 
     # ---------- 路由 ----------
     def do_GET(self) -> None:  # noqa: N802
@@ -291,6 +349,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._handle_upload()
             finally:
                 _slots.release()
+            return
+        if self.path == "/api/upload/drop":
+            # 删掉自己刚上传的文件。不消耗额度（删除不该收费），也不占并发槽。
+            self._handle_drop()
             return
         if self.path != "/api/analyze":
             self._json(404, {"error": "not found"})
@@ -418,6 +480,11 @@ def main() -> None:
 
     if not (1 <= args.port <= 65535):
         ap.error(f"端口必须在 1-65535 之间，收到 {args.port}")
+
+    # 启动先扫一次：/tmp 不保证跨重启清空（裸机不会），旧文件不该跟着重启一起留下
+    _swept = _sweep_uploads()
+    if _swept:
+        print(f"启动清扫：删除 {_swept} 个过期上传件", flush=True)
 
     try:
         srv = ThreadingHTTPServer((args.host, args.port), Handler)

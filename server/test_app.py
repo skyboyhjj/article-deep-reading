@@ -331,6 +331,105 @@ class TestUpload(Base):
                 f.unlink(missing_ok=True)
 
 
+class TestUploadTtl(Base):
+    """A：上传件兜底清扫（v2.20）。分析结束会立刻删，这里测「没分析的那些」。"""
+
+    def _touch(self, name, age):
+        p = app.UPLOAD_DIR / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+        old = time.time() - age
+        os.utime(p, (old, old))
+        return p
+
+    def test_expired_file_removed(self):
+        p = self._touch("a__old.mp4", app.UPLOAD_TTL + 60)
+        self.assertEqual(app._sweep_uploads(), 1)
+        self.assertFalse(p.exists())
+
+    def test_fresh_file_kept(self):
+        p = self._touch("b__new.mp4", 60)
+        self.assertEqual(app._sweep_uploads(), 0)
+        self.assertTrue(p.exists())
+
+    def test_missing_dir_returns_zero(self):
+        shutil.rmtree(app.UPLOAD_DIR, ignore_errors=True)
+        self.assertEqual(app._sweep_uploads(), 0)
+
+    def test_only_expired_removed(self):
+        old = self._touch("c__old.mp4", app.UPLOAD_TTL + 60)
+        new = self._touch("d__new.mp4", 60)
+        self.assertEqual(app._sweep_uploads(), 1)
+        self.assertFalse(old.exists())
+        self.assertTrue(new.exists())
+
+    def test_counts_all_expired(self):
+        self._touch("e__1.mp4", app.UPLOAD_TTL + 10)
+        self._touch("f__2.mp4", app.UPLOAD_TTL + 20)
+        self.assertEqual(app._sweep_uploads(), 2)
+
+    def test_upload_triggers_sweep(self):
+        """上传时顺手清扫，不依赖定时任务。"""
+        old = self._touch("g__old.mp4", app.UPLOAD_TTL + 60)
+        blob = b"\0" * 64
+        status, _, _ = request("POST", "/api/upload", body=blob,
+                               headers={"Content-Length": str(len(blob)),
+                                        "X-Filename": "new.mp4"})
+        self.assertEqual(status, 200)
+        self.assertFalse(old.exists())
+
+
+class TestUploadDrop(Base):
+    """C：POST /api/upload/drop（v2.20）。"""
+
+    def _upload(self):
+        blob = b"\0" * 256
+        status, _, body = request("POST", "/api/upload", body=blob,
+                                  headers={"Content-Length": str(len(blob)),
+                                           "X-Filename": "demo.mp4"})
+        self.assertEqual(status, 200)
+        return json.loads(body)["id"]
+
+    def test_drop_removes_file(self):
+        uid = self._upload()
+        self.assertTrue(list(app.UPLOAD_DIR.glob(f"{uid}__*")))
+        status, _, body = post_json("/api/upload/drop", {"id": uid})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["removed"], 1)
+        self.assertFalse(list(app.UPLOAD_DIR.glob(f"{uid}__*")))
+
+    def test_drop_missing_is_idempotent(self):
+        status, _, body = post_json("/api/upload/drop", {"id": "0" * 16})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["removed"], 0)
+
+    def test_drop_bad_id_rejected(self):
+        for bad in ("", "xyz", "a" * 15, "a" * 17, "../etc/passwd"):
+            status, _, _ = post_json("/api/upload/drop", {"id": bad})
+            self.assertEqual(status, 400, bad)
+
+    def test_drop_then_analyze_404(self):
+        uid = self._upload()
+        post_json("/api/upload/drop", {"id": uid})
+        status, _, body = post_json("/api/analyze", {"upload_id": uid})
+        self.assertEqual(status, 404)
+        self.assertIn("不存在或已过期", json.loads(body)["error"])
+
+    def test_drop_does_not_consume_quota(self):
+        """删除是收尾动作，收费会让人宁可留着不删。"""
+        uid = self._upload()
+        calls = []
+        real = app.LIMITER.allow
+
+        def spy(ip):
+            calls.append(ip)
+            return real(ip)
+
+        with mock.patch.object(app.LIMITER, "allow", side_effect=spy):
+            post_json("/api/upload/drop", {"id": uid})
+        self.assertEqual(calls, [])
+
+
 class TestConcurrency(Base):
     """并发额度：满了给 503，不排队；成功与失败都要把额度还回来。"""
 

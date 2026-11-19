@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.19**（2026-11-19）
+- 当前版本：**v2.20**（2026-11-19）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、17 套 CI 测试。
 
@@ -459,6 +459,14 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **改法**：`render_brief` 加 `_q()` 回填；新增 `_no_change_fix()` 前缀判定；`_count_verdicts` 加「降级」档，结论与统计改用 `不实 + 半对 − 降级`；有降级或未核时不再说「都站得住」
 - **测试**：`test_pipeline_e2e` 20 → 24 项，四条新断言均做了反向验证
 - **文件**：`server/pipeline.py`、`server/test_pipeline_e2e.py`
+
+### 30. 数据治理四项（v2.20）
+
+- **起因**：上传件只在 `analyze` 的 `finally` 才删 —— 上传后不点「开始读解」会一直留着；README 又没有任何数据承诺，等于「没说不留，也确实一直留着」
+- **改法**：`UPLOAD_TTL` + 惰性清扫 `_sweep_uploads()`（上传前 + 启动时，不起线程）；新增 `POST /api/upload/drop`（幂等、不耗额度、不占并发槽）；限流键改 `sha256(RL_SALT+IP)[:32]`，内存实现同样；README 增「数据与隐私」节，`.env.example` 补 `UPLOAD_TTL_HOURS` 与 `RL_SALT`
+- **测试**：`test_app` 35 → 46、`test_ratelimit` 17 → 20，六条新断言均做反向验证
+- **已知边界**：清扫与上传之间无跨进程锁（需「创建后 24 小时仍在写」才会误删）；轮换 `RL_SALT` 等同全员额度重置
+- **文件**：`server/app.py`、`server/ratelimit.py`、`README.md`、`.env.example`、`docs/RATE_LIMITING.md`
 
 ## 待办
 

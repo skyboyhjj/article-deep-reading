@@ -141,6 +141,17 @@ docker exec <redis容器> redis-cli SET dr:cfg:limit N
 docker exec <redis容器> redis-cli DEL dr:cfg:limit
 ```
 
+### 键与盐（v2.20）
+
+Redis 里的键形如 `dr:rl:<32 位 hex>`，内容是 `sha256(RL_SALT + IP)` 的前 32 位，**不留明文 IP**。`RL_SALT` 由环境变量给出，默认 `deepread-v1`。
+
+轮换盐等于让所有旧键作废，效果等同于「全员额度重置」，所以：
+
+- 平时不用换；
+- 真要换，挑低峰，并提前说明「本小时额度会重置，不是故障」。
+
+内存实现同样用哈希做键 —— 崩溃转储和调试打印都可能把内存里的字典带出来。
+
 ### 行为语义（重要）
 
 - 校验层（空体 / 超限 / 错扩展名 / 空 payload）在限流**之前**返回，不耗额度。

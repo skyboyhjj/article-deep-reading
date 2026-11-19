@@ -100,6 +100,13 @@ class TestMemory(unittest.TestCase):
         self.assertFalse(lim.allow("1.1.1.1")[0])
         self.assertNotEqual(lim.allow("1.1.1.1")[2], "unavailable")
 
+    def test_memory_key_is_hashed(self):
+        """内存里也不留明文 IP —— 崩溃转储与调试打印都可能把它带出去。"""
+        lim = ratelimit.MemoryRateLimiter(2)
+        lim.allow("8.8.4.4")
+        self.assertNotIn("8.8.4.4", lim._hits)
+        self.assertIn(ratelimit._hash_ip("8.8.4.4"), lim._hits)
+
 
 class TestRedis(unittest.TestCase):
     def make(self, limit=2, fail=False):
@@ -140,9 +147,32 @@ class TestRedis(unittest.TestCase):
             self.assertAlmostEqual(retry, 3600 - 100, delta=1)
 
     def test_prefix_and_key(self):
+        """键形如 dr:rl:<32 位哈希>，redis 里不留明文 IP。"""
         lim, fake = self.make()
         lim.allow("8.8.4.4")
-        self.assertIn("dr:rl:8.8.4.4", fake.zsets)
+        keys = list(fake.zsets)
+        self.assertEqual(len(keys), 1)
+        self.assertTrue(keys[0].startswith("dr:rl:"))
+        self.assertNotIn("8.8.4.4", keys[0])
+        self.assertRegex(keys[0], r"^dr:rl:[0-9a-f]{32}$")
+
+    def test_same_ip_same_key(self):
+        """同一 IP 必须落到同一个键，否则限流失效。"""
+        lim, fake = self.make(limit=5)
+        lim.allow("8.8.4.4")
+        lim.allow("8.8.4.4")
+        self.assertEqual(len(fake.zsets), 1)
+        self.assertEqual(len(next(iter(fake.zsets.values()))), 2)
+
+    def test_different_ip_different_key(self):
+        lim, fake = self.make(limit=5)
+        lim.allow("8.8.4.4")
+        lim.allow("9.9.9.9")
+        self.assertEqual(len(fake.zsets), 2)
+        self.assertEqual(ratelimit._hash_ip("8.8.4.4"),
+                         ratelimit._hash_ip("8.8.4.4"))
+        self.assertNotEqual(ratelimit._hash_ip("8.8.4.4"),
+                            ratelimit._hash_ip("9.9.9.9"))
 
     def test_hot_config_override(self):
         """额度可热配置：SET dr:cfg:limit 后即时生效，无需重启。"""
