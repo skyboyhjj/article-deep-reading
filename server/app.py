@@ -109,16 +109,26 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     # ---------- 基础 ----------
-    def _send(self, code: int, body: bytes, ctype: str) -> None:
+    def _send(self, code: int, body: bytes, ctype: str, headers: dict | None = None) -> None:
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
-    def _json(self, code: int, obj: dict) -> None:
-        self._send(code, json.dumps(obj, ensure_ascii=False).encode(), "application/json; charset=utf-8")
+    def _json(self, code: int, obj: dict, headers: dict | None = None) -> None:
+        self._send(code, json.dumps(obj, ensure_ascii=False).encode(),
+                   "application/json; charset=utf-8", headers)
+
+    def _exceeded(self, retry_after: float | None) -> None:
+        """额度用尽：429 + Retry-After，让客户端能明确告知「约 X 后恢复」。"""
+        sec = int(round(retry_after)) if retry_after else 0
+        self._json(429, {"error": f"每小时限 {LIMITER.current_limit()} 次，请稍后再试",
+                         "retry_in_seconds": sec},
+                   headers={"Retry-After": str(sec)})
 
     # ---------- SSE ----------
     def _sse_open(self) -> None:
@@ -209,12 +219,12 @@ class Handler(BaseHTTPRequestHandler):
                                       f"可选：{', '.join(sorted(ALLOWED_EXT))}"})
             return
 
-        ok, left, state = LIMITER.allow(self._client_ip())
+        ok, left, state, retry_after = LIMITER.allow(self._client_ip())
         if not ok:
             if state == "unavailable":
                 self._json(503, {"error": "限流服务暂不可用，请稍后再试"})
             else:
-                self._json(429, {"error": f"每小时限 {RATE_LIMIT} 次，请稍后再试"})
+                self._exceeded(retry_after)
             return
 
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -331,12 +341,12 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "粘贴正文过长（上限 20 万字符）"})
             return
 
-        ok, left, state = LIMITER.allow(self._client_ip())
+        ok, left, state, retry_after = LIMITER.allow(self._client_ip())
         if not ok:
             if state == "unavailable":
                 self._json(503, {"error": "限流服务暂不可用，请稍后再试"})
             else:
-                self._json(429, {"error": f"每小时限 {RATE_LIMIT} 次，请稍后再试"})
+                self._exceeded(retry_after)
             return
 
         if not self._acquire_slot():

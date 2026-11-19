@@ -461,7 +461,7 @@ class TestClientIp(Base):
             limit = 4
 
             def allow(self, ip):
-                return False, 0, "unavailable"
+                return False, 0, "unavailable", None
 
         with mock.patch.object(app, "LIMITER", Down()):
             status, _, body = self._call()

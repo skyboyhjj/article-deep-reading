@@ -331,6 +331,12 @@ function fmtDur(sec){
   return Math.floor(t / 60) + "分" + String(t % 60).padStart(2, "0") + "秒";
 }
 
+function fmtWait(sec){
+  const s = Math.ceil(sec || 0);
+  if(s <= 0) return "";
+  return s < 60 ? ("约 " + s + " 秒后恢复") : ("约 " + Math.ceil(s / 60) + " 分钟后恢复");
+}
+
 function uploadFile(f){
   const xhr = new XMLHttpRequest();
   xhr.open("POST", "/api/upload");
@@ -357,7 +363,7 @@ function uploadFile(f){
       $("fname").textContent = "已上传：" + r.name + "（" + mb + " MB" + dur + "）— 将走原声转录";
     }else{
       $("fprog").textContent = "";
-      $("err").textContent = "上传失败：" + (r.error || ("HTTP " + xhr.status));
+      $("err").textContent = "上传失败：" + (r.error || ("HTTP " + xhr.status)) + (r.retry_in_seconds ? "（" + fmtWait(r.retry_in_seconds) + "）" : "");
     }
   };
   xhr.onerror = () => {
@@ -405,9 +411,13 @@ async function run(){
     });
     if(!resp.ok || !resp.body){
       const t = await resp.text();
-      let msg = t;
-      try{ msg = JSON.parse(t).error || t; }catch(e){}
-      $("err").textContent = "请求失败：" + msg;
+      let msg = t, wait = "";
+      try{
+        const j = JSON.parse(t);
+        msg = j.error || t;
+        if(j.retry_in_seconds) wait = "（" + fmtWait(j.retry_in_seconds) + "）";
+      }catch(e){}
+      $("err").textContent = "请求失败：" + msg + wait;
       return;
     }
 

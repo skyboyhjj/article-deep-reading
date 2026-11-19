@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""限流器的单元测试：两种实现同一个接口，重点验「三态」与「fail closed」。
+"""限流器的单元测试：两种实现同一个接口，重点验「三态」「滑动窗口」「fail closed」。
 
 为什么不只测内存实现：部署是多副本 + Redis，而**Redis 挂掉时的行为**才是
 最容易出事的地方 —— 回退内存等于悄悄把额度放大 N 倍。所以这里用假客户端
 把「连不上」这条路也压一遍，且不准它吞掉异常后装作正常。
+
+接口是四元组 `(是否放行, 剩余次数, 状态, 恢复还需秒数)`，见 ratelimit 模块注释。
 """
 import os
 import sys
@@ -15,42 +17,61 @@ import ratelimit  # noqa: E402
 
 
 class FakeRedis:
-    """够用的假客户端：只实现限流用到的那几个命令。"""
+    """够用的假客户端：实现限流用到的 ping/get/eval，eval 用 Python 复刻同一段 Lua 语义。"""
 
     def __init__(self, fail=False):
-        self.store: dict[str, int] = {}
-        self.ttl: dict[str, int] = {}
         self.fail = fail
         self.calls = 0
+        self.zsets: dict[str, dict[str, float]] = {}   # key -> {member: score}
+        self.config: dict[str, str] = {}
+        self.last_script = None
 
-    def incr(self, key):
-        self.calls += 1
+    def _boom(self):
         if self.fail:
             raise ConnectionError("redis down")
-        self.store[key] = self.store.get(key, 0) + 1
-        return self.store[key]
-
-    def expire(self, key, seconds):
-        if self.fail:
-            raise ConnectionError("redis down")
-        self.ttl[key] = seconds
-        return True
 
     def ping(self):
         self.calls += 1
-        if self.fail:
-            raise ConnectionError("redis down")
+        self._boom()
         return True
+
+    def get(self, key):
+        self.calls += 1
+        self._boom()
+        return self.config.get(key)
+
+    def eval(self, script, numkeys, *args):
+        self.calls += 1
+        self._boom()
+        self.last_script = script
+        # args = [key, now, window, limit, member]（numkeys=1）
+        key = args[0]
+        now = float(args[1])
+        window = float(args[2])
+        limit = int(args[3])
+        member = args[4]
+        z = self.zsets.setdefault(key, {})
+        for m in list(z):
+            if z[m] <= now - window:
+                del z[m]
+        z[member] = now
+        count = len(z)
+        if count > limit:
+            z.pop(member, None)
+            oldest = min(z.values()) if z else now
+            return [0, 0, oldest + window - now]
+        return [1, limit - count, 0]
 
 
 class TestMemory(unittest.TestCase):
     def test_limit_and_remaining(self):
         lim = ratelimit.MemoryRateLimiter(2)
-        self.assertEqual(lim.allow("1.1.1.1"), (True, 1, "ok"))
-        self.assertEqual(lim.allow("1.1.1.1"), (True, 0, "ok"))
-        ok, left, state = lim.allow("1.1.1.1")
+        self.assertEqual(lim.allow("1.1.1.1"), (True, 1, "ok", None))
+        self.assertEqual(lim.allow("1.1.1.1"), (True, 0, "ok", None))
+        ok, left, state, retry = lim.allow("1.1.1.1")
         self.assertFalse(ok)
         self.assertEqual((left, state), (0, "exceeded"))
+        self.assertGreater(retry, 0)
 
     def test_ips_are_independent(self):
         lim = ratelimit.MemoryRateLimiter(1)
@@ -85,31 +106,55 @@ class TestRedis(unittest.TestCase):
         fake = FakeRedis(fail=fail)
         return ratelimit.RedisRateLimiter("redis://x/0", limit, client=fake), fake
 
-    def test_counts_and_sets_ttl_on_first(self):
-        lim, fake = self.make(limit=2)
-        self.assertEqual(lim.allow("1.1.1.1"), (True, 1, "ok"))
-        self.assertEqual(fake.store["dr:rl:1.1.1.1"], 1)
-        self.assertEqual(fake.ttl["dr:rl:1.1.1.1"], 3600)
-        self.assertEqual(lim.allow("1.1.1.1"), (True, 0, "ok"))
-        self.assertEqual(lim.allow("1.1.1.1"), (False, 0, "exceeded"))
+    def test_limit_and_remaining(self):
+        lim, _ = self.make(limit=2)
+        self.assertEqual(lim.allow("1.1.1.1"), (True, 1, "ok", None))
+        self.assertEqual(lim.allow("1.1.1.1"), (True, 0, "ok", None))
+        ok, left, state, retry = lim.allow("1.1.1.1")
+        self.assertFalse(ok)
+        self.assertEqual((left, state), (0, "exceeded"))
+        self.assertGreater(retry, 0)
 
-    def test_ttl_only_on_first_increment(self):
-        """每次 INCR 都 EXPIRE 会把窗口不断延后，等于永不重置。"""
-        lim, fake = self.make(limit=5)
-        lim.allow("1.1.1.1")
-        fake.ttl.clear()
-        lim.allow("1.1.1.1")
-        self.assertEqual(fake.ttl, {})
+    def test_sliding_window_recovers_gradually(self):
+        """滑动窗口的核心价值：最早一笔掉出窗口即回 1 次，而非整点一次性恢复。"""
+        fake = [1_000_000.0]
+        lim, _ = self.make(limit=2)
+        with mock.patch.object(ratelimit, "_now", lambda: fake[0]):
+            self.assertTrue(lim.allow("1.1.1.1")[0])   # t=0
+            fake[0] += 100
+            self.assertTrue(lim.allow("1.1.1.1")[0])   # t=100
+            fake[0] += 100
+            self.assertFalse(lim.allow("1.1.1.1")[0])  # t=200 满
+            fake[0] += 3600 - 150                        # t=3650，t=0 那笔掉出
+            self.assertTrue(lim.allow("1.1.1.1")[0])   # 恢复 1 次
+
+    def test_retry_after_is_oldest_remaining(self):
+        fake = [1_000_000.0]
+        lim, _ = self.make(limit=1)
+        with mock.patch.object(ratelimit, "_now", lambda: fake[0]):
+            self.assertTrue(lim.allow("1.1.1.1")[0])      # t=0
+            fake[0] += 100
+            ok, _, state, retry = lim.allow("1.1.1.1")    # t=100 exceeded
+            self.assertFalse(ok)
+            self.assertEqual(state, "exceeded")
+            self.assertAlmostEqual(retry, 3600 - 100, delta=1)
 
     def test_prefix_and_key(self):
         lim, fake = self.make()
         lim.allow("8.8.4.4")
-        self.assertIn("dr:rl:8.8.4.4", fake.store)
+        self.assertIn("dr:rl:8.8.4.4", fake.zsets)
+
+    def test_hot_config_override(self):
+        """额度可热配置：SET dr:cfg:limit 后即时生效，无需重启。"""
+        lim, fake = self.make(limit=2)
+        fake.config["dr:cfg:limit"] = "5"
+        self.assertEqual(lim.allow("1.1.1.1")[1], 4)   # 剩余 = 5 - 1
+        self.assertEqual(lim.current_limit(), 5)       # 429 文案也读动态额度
 
     def test_failure_is_unavailable_not_exceeded(self):
         """连不上必须报 unavailable —— 报 exceeded 会让用户以为自己用超了。"""
         lim, _ = self.make(fail=True)
-        self.assertEqual(lim.allow("1.1.1.1"), (False, 0, "unavailable"))
+        self.assertEqual(lim.allow("1.1.1.1"), (False, 0, "unavailable", None))
 
     def test_breaker_stops_hammering(self):
         """故障后冷却期内不再重试，否则每个请求都卡满连接超时。"""
