@@ -19,6 +19,7 @@
 | 改 ASR / 语音画像 | `README.md` 对应两节 + `.env.example` 注释（**接口硬约束写在注释里**） |
 | 改前端 | `web/index.html`（单文件，无构建，改完手机窄屏要看一眼） |
 | 改限流 / 额度 / 429 提示 | `docs/RATE_LIMITING.md`（方案 + 运维命令，含 `dr:cfg:limit` 热配置）+ `server/ratelimit.py` 顶部注释 |
+| 改阶段标签 / 状态配色 | `docs/RUN_STATES.md`（五态语义 + 对比度硬线）+ `server/test_ui_contract.py` 的 `TestHomeTheme` |
 | 改 `skills/` 下脚本 | 该技能的 `SKILL.md` + `docs/SOP.md` §3 |
 | 写数学 / 理论物理文档 | `skills/math-doc-rigor/SKILL.md` + `references/render-rules.md` |
 

@@ -362,7 +362,8 @@ article-deep-reading/
     ├── SOP.md                  ← 方法本体：七步流程与踩坑清单
     ├── ARCHITECTURE.md         ← 架构决策、失败模式、成本、扩展路线
     ├── TESTING.md              ← 测试说明：17 套逐条、核对清单、三个反向实验
-    └── RATE_LIMITING.md        ← 限流与额度：滑动窗口、Retry-After、热配置运维
+    ├── RATE_LIMITING.md        ← 限流与额度：滑动窗口、Retry-After、热配置运维
+    └── RUN_STATES.md           ← 运行状态与配色：五态含义、颜色驱动、改色规矩
 ```
 
 `skills/` 与 `server/` 是**同一套方法的两副形态**：前者给平台内的助手用，后者给人用。
@@ -479,6 +480,7 @@ $env:INSECURE_TLS="1"
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | 架构决策与失败模式：每个决策后跟一句「不这么做会怎样」 |
 | [docs/TESTING.md](./docs/TESTING.md) | 测试说明：17 套测试逐条、核对清单、三个反向实验 |
 | [docs/RATE_LIMITING.md](./docs/RATE_LIMITING.md) | 限流与额度：滑动窗口、Retry-After、热配置 `dr:cfg:limit` 的运维手册 |
+| [docs/RUN_STATES.md](./docs/RUN_STATES.md) | 运行状态与配色：五个状态的含义、颜色由谁驱动、改色时的四条硬规矩 |
 | [CHANGELOG.md](./CHANGELOG.md) | 变更记录，只记使用者能感觉到的改动 |
 
 ---
