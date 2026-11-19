@@ -155,5 +155,43 @@ class TestReportLayers(unittest.TestCase):
             self.assertIn(f'"{key}"', body, f"showTab 没处理 {key}")
 
 
+class TestHomeTheme(unittest.TestCase):
+    """v2.22 首页改版：慧惠口径 + 数据去向。
+
+    这里的断言都是「文案与代码事实对得上」——首页写出去的每条承诺，都要能在
+    代码里指到位置，否则就是把伦理写成广告。
+    """
+
+    def setUp(self):
+        self.html = INDEX.read_text(encoding="utf-8")
+
+    def test_hero_present(self):
+        self.assertIn("你好呀，我是慧惠", self.html)
+        self.assertIn("我只读一遍，不留一片垃圾", self.html)
+
+    def test_data_card_is_collapsed(self):
+        """数据去向必须折叠，且默认收起 —— 首屏留给「能帮你做什么」。"""
+        m = re.search(r'<details[^>]*class="[^"]*data[^"]*"[^>]*>(.{0,120})', self.html, re.S)
+        self.assertTrue(m, "找不到数据去向折叠块")
+        self.assertIn("这次读解会产生什么数据", m.group(1))
+        self.assertNotIn(" open", m.group(0), "数据去向不该默认展开")
+
+    def test_disclaimer_says_input_not_body(self):
+        self.assertIn("依据输入内容生成", self.html)
+        self.assertNotIn("所给正文", self.html)
+
+    def test_drop_button_is_wired(self):
+        """删除按钮必须真的接上 /api/upload/drop，否则是个死按钮。"""
+        self.assertIn('id="dropBtn"', self.html)
+        m = re.search(r'\$\("dropBtn"\)\.addEventListener\("click".{0,400}', self.html, re.S)
+        self.assertTrue(m, "dropBtn 没有绑定点击")
+        self.assertIn("/api/upload/drop", m.group(0))
+
+    def test_footer_links_to_ethics(self):
+        """四条铁律归拢到伦理页 —— 首页只留入口。"""
+        self.assertIn("hui-skill.org/ethics", self.html)
+        self.assertNotIn("四条铁律", self.html)
+
+
 if __name__ == "__main__":
     unittest.main()
