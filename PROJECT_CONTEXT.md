@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.20**（2026-11-19）
+- 当前版本：**v2.21**（2026-11-19）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、17 套 CI 测试。
 
@@ -467,6 +467,13 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **测试**：`test_app` 35 → 46、`test_ratelimit` 17 → 20，六条新断言均做反向验证
 - **已知边界**：清扫与上传之间无跨进程锁（需「创建后 24 小时仍在写」才会误删）；轮换 `RL_SALT` 等同全员额度重置
 - **文件**：`server/app.py`、`server/ratelimit.py`、`README.md`、`.env.example`、`docs/RATE_LIMITING.md`
+
+### 31. 免责声明改准（v2.21）
+
+- **起因**：`render_brief()` 写「依据所给正文生成」，而本项目支持链接 / 粘贴 / 音视频三种输入 —— 上传音视频的人看到的是转录稿，不是正文
+- **改法**：改为「依据输入内容生成」；详细版那句不动（它后面已有转录分支补充「涉及引用与数字请回原声复核」）
+- **测试**：`test_pipeline_e2e` 加一条断言（必须说「输入内容」且不得出现「所给正文」），已做反向验证
+- **文件**：`server/pipeline.py`、`server/test_pipeline_e2e.py`
 
 ## 待办
 

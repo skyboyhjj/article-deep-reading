@@ -1434,7 +1434,7 @@ def render_brief(url: str, doc: dict, triage: dict, verify: dict,
         L.append("")
 
     L.append("---")
-    L.append(f"本报告由 AI 依据所给正文生成，**未经人工复核**。"
+    L.append(f"本报告由 AI 依据输入内容生成，**未经人工复核**。"
              f"完整核验（{c['n']} 条，含依据与出处）见「详细版」。")
     L.append("")
     L.append("> 建议先自己读一遍原文，再对照这份核验 —— 读解能省时间，不能替你判断。")
