@@ -235,6 +235,8 @@ class TestHomeTheme(unittest.TestCase):
     def test_footer_links_to_ethics(self):
         """四条铁律归拢到伦理页 —— 首页只留入口。"""
         self.assertIn("hui-skill.org/ethics", self.html)
+        self.assertIn("hui-skill.org/ethics#data-rules", self.html,
+                      "页脚应直达伦理页的「数据四条铁律」块")
         self.assertNotIn("四条铁律", self.html)
 
     def test_stages_hidden_until_run(self):

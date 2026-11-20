@@ -6,6 +6,18 @@
 
 ---
 
+## v2.23 · 2026-11-20
+
+**页脚直达：点《慧惠的 AI 伦理》直接落到「数据四条铁律」。**
+
+首页页脚的链接由 `hui-skill.org/ethics` 改为 `hui-skill.org/ethics#data-rules`，打开即定位到那一块，并自动展开（该块默认折叠）。
+
+配套：伦理页的 hash 路由改了一层判断——只有 `#tab-*` 才走 tab 切换，其余锚点交给 `scrollToAnchor`（先激活所在 tab、再展开折叠块、后滚动）。改之前 `#data-rules` 会被误当成 tab id 交给 `activateTab()`，四个 tab 的内容会全部隐藏。
+
+测试：`test_footer_links_to_ethics` 增加锚点断言。
+
+---
+
 ## v2.22 · 2026-11-19
 
 **首页改成「慧惠 · 数据环保卫士」：不是换皮肤，是把数据治理翻译成看得见的承诺。**
