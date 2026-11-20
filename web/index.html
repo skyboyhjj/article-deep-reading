@@ -40,6 +40,10 @@
     font-size:26px;margin:0 0 12px;letter-spacing:3px;color:var(--ink);font-weight:700;
     font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
   }
+  /* 标题共 18 个全角字符，窄屏一行放不下（18×21=378px > 332px 可用宽）。
+     与其把字缩到 16px 伤层级，不如让它在逗号后断成两行，每行 9 字（189px），
+     320px 屏也放得下；后半句整体不拆，保证断点始终在「慧惠，」后面。 */
+  .h1-tail{white-space:nowrap}
   .sub{color:var(--ink-soft);font-size:15px;margin:0 0 8px;line-height:1.78;font-style:italic}
   .guide{color:var(--muted);font-size:13.5px;margin:0;letter-spacing:1px}
   .box{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}
@@ -182,7 +186,7 @@
     .hero{padding:2px 0 0;margin-bottom:20px}
     .icon{width:88px;height:88px;margin-bottom:12px}
     .icon-inner{width:54px;height:54px}
-    h1{font-size:20px;letter-spacing:1px}
+    h1{font-size:22px;letter-spacing:2px}
     .sub{font-size:14px}
     .guide{font-size:12.5px}
     .box{flex-direction:column;margin-top:18px}
@@ -230,7 +234,7 @@
         <path d="M21 21v-5h-5"/>
       </svg>
     </div></div>
-    <h1>你好呀，我是慧惠，你的数据环保卫士。</h1>
+    <h1>你好呀，我是慧惠，<span class="h1-tail">你的数据环保卫士。</span></h1>
     <p class="sub">把文章交给我，我帮你看看<br>哪些话有根据，哪些话只是作者在说。</p>
     <p class="guide">我只读一遍，不留一片垃圾。</p>
   </div>

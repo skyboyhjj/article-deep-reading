@@ -193,6 +193,16 @@ class TestHomeTheme(unittest.TestCase):
         """一句话说清「我是谁、我为你做什么」。"""
         self.assertIn("你的数据环保卫士", self.html)
 
+    def test_hero_tail_is_unbreakable(self):
+        """标题 18 个全角字符，窄屏一行放不下（378px > 332px）。
+
+        断点必须锁在逗号后：后半句整体不拆，两行各 9 字才均衡；
+        否则浏览器会在「你」「的」之间乱断。
+        """
+        self.assertIn('<span class="h1-tail">你的数据环保卫士。</span>', self.html)
+        m = re.search(r"\.h1-tail\{[^}]*white-space:\s*nowrap", self.html)
+        self.assertTrue(m, "h1-tail 没有 nowrap，窄屏会在句中乱断")
+
     def test_primary_button_names_the_actor(self):
         """按钮主语是慧惠，不是含糊的「帮我」。"""
         m = re.search(r'<button id="go">([^<]*)</button>', self.html)
