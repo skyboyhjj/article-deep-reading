@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.22**（2026-11-19）
+- 当前版本：**v2.23**（2026-11-20）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、17 套 CI 测试。
 
@@ -484,6 +484,14 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **四条铁律不在首页**：全局原则与「本服务怎么做」是两层，同屏并列会互相削弱；正文留给伦理页
 - **测试**：`test_ui_contract` 11 → 16 项，五条守卫均做反向验证；`tools/e2e_switch_check` 两轮通过；17 个元素 id 与三档 tab 未动
 - **文件**：`web/index.html`、`server/test_ui_contract.py`
+
+### 33. 页脚直达伦理页的「数据四条铁律」（v2.23）
+
+- **起因**：页脚链接只到 `hui-skill.org/ethics` 顶部，用户还要自己找那一块；该块在伦理页「伦理观」tab 内、且默认折叠
+- **改法**：伦理页给该块加 `id="data-rules"`，页脚链接改为 `hui-skill.org/ethics#data-rules`
+- **前置修复（在伦理页侧）**：原 hash 路由是 `if (hash && getElementById(hash)) activateTab(hash, true)` —— 任何存在的 id 都被当成 tab id，`#data-rules` 会让四个 tab 的 `active` 全被移除、内容全部隐藏。改为只认 `.tab-btn[data-tab=...]`，其余锚点交给 `scrollToAnchor()`（激活所在 tab → 展开折叠块 → 滚动）
+- **测试**：`test_footer_links_to_ethics` 增加 `ethics#data-rules` 断言并做反向验证（去掉锚点即变红）
+- **文件**：`web/index.html`、`server/test_ui_contract.py`、`CHANGELOG.md`
 
 ## 待办
 
