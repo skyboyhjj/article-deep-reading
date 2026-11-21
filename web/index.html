@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light">
 <title>慧惠 · 把文章拆开看看</title>
+<meta name="description" content="慧惠读解：把文章拆开看看——粘贴链接或上传音视频，看哪些话有根据、哪些话只是作者在说。不记录、不存档、读完就删。">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='12' fill='%232e5f5f'/><path d='M20 11a8 8 0 0 0-13.7-5.7L3 8' fill='none' stroke='%23fffcf0' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/><path d='M3 3v5h5' fill='none' stroke='%23fffcf0' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/><path d='M4 13a8 8 0 0 0 13.7 5.7L21 16' fill='none' stroke='%23fffcf0' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/><path d='M21 21v-5h-5' fill='none' stroke='%23fffcf0' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="慧惠读解">
+<meta property="og:title" content="慧惠 · 把文章拆开看看">
+<meta property="og:description" content="哪些话有根据，哪些话只是作者在说。粘贴链接或上传音视频，读完就删，不留一片垃圾。">
+<meta property="og:url" content="https://deepread.hui-skill.cn/">
+<meta name="twitter:card" content="summary">
 <style>
   :root{
     /* 取色自 hui-skill.org：墨青主色 + 米白底 + 沙色边框（边框不是灰的，整页才不冷） */
@@ -294,11 +302,13 @@
       <span class="tabs">
         <button class="tab on" data-v="brief">简约</button>
         <button class="tab" data-v="view">详细</button>
+        <button class="tab" data-v="calc">算据</button>
         <button class="tab" data-v="raw">原文</button>
       </span>
     </h2>
     <div id="bview" class="md"></div>
     <div id="rview" class="md" style="display:none"></div>
+    <div id="cview" class="md" style="display:none"></div>
     <pre id="report" style="display:none"></pre>
     <div class="actions">
       <a id="dl" download="读解.md" href="#">下载 Markdown</a>
@@ -577,6 +587,7 @@ function handleEvent(chunk){
     const brief = data.brief || full;
     $("bview").innerHTML = md2html(brief);
     $("rview").innerHTML = md2html(full);
+    $("cview").innerHTML = md2html(data.calc || "本报告没有可复算的算式。");
     $("report").textContent = full;
     $("reportCard").style.display = "block";
     showTab("brief");            // 默认给简约版：先结论，详细版按需展开
@@ -593,6 +604,7 @@ function showTab(name){
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.dataset.v === name));
   $("bview").style.display   = name === "brief" ? "block" : "none";
   $("rview").style.display   = name === "view"  ? "block" : "none";
+  $("cview").style.display   = name === "calc"  ? "block" : "none";
   $("report").style.display  = name === "raw"   ? "block" : "none";
 }
 

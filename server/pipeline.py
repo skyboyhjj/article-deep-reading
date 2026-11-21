@@ -1200,6 +1200,34 @@ def render_report(url: str, doc: dict, triage: dict, verify: dict, calc: dict, c
         L.append("未提取到可核项。")
     L.append("")
 
+    # ── 不实与过时说法清单（占位节）────────────────────────
+    # 单独一张表，能脱离上下文截图传播。四分类（硬错 / 表述偏差 /
+    # 已被推翻 / 未确证）后续再精细化，当前按现有判定聚合「有问题」的项。
+    # 降级项（引文与原文一致、只是缺外部出处）不算错，故排除。
+    untrue = [it for it in items
+              if isinstance(it, dict)
+              and it.get("verdict") in ("不实", "半对")
+              and "已降级" not in str(it.get("evidence") or "")]
+    if untrue:
+        head("不实与过时说法清单")
+        L.append("引用本文时，请绕开以下说法。")
+        L.append("")
+        L.append("| # | 原文说法 | 判定 | 应改为 | 依据 |")
+        L.append("|---|---|---|---|---|")
+        claims_l = triage.get("claims") or []
+        for idx, it in enumerate(untrue, 1):
+            n = it.get("n")
+            quote = ""
+            if isinstance(n, int) and 1 <= n <= len(claims_l):
+                quote = str(claims_l[n - 1].get("quote") or "").strip()
+            L.append(
+                f"| {idx} | {_cell(quote, 60)} | {it.get('verdict')} "
+                f"| {_cell(it.get('fix', '—'), 60)} | {_cell(it.get('evidence', '—'), 120)} |"
+            )
+        L.append("")
+        L.append("> 本清单只说明上述说法不实或存疑，不构成对事件本身真伪的判断。")
+        L.append("")
+
     head("实算（由受限求值器执行）")
     recs = calc.get("items") or []
     if recs:
@@ -1303,6 +1331,51 @@ def _count_verdicts(verify: dict, calc: dict) -> dict:
     c["已实算"] = sum(1 for r in recs if r.get("status") == "已实算")
     c["不符"] = sum(1 for r in recs if r.get("status") == "不符")
     return c
+
+
+def render_calc(calc: dict) -> str:
+    """产出「算据」：把每条成功实算的算式拼成可复算脚本 + 实跑输出表。
+
+    只对 value 非 None（已成功实算）的项生成变量赋值与 print——凡能实算，
+    symbols 的键名必是合法 Python 标识符，直接拼即可复跑；失败项只写说明。
+    """
+    items = calc.get("items") or []
+    if not items:
+        return ""
+    L = ["# 算据 · 表达式与实跑结果", ""]
+    L.append("> 以下是本报告核验用到的算式。每个算式给出变量取值与表达式，")
+    L.append("> 整段复制到 Python（仅标准库 math）即可复算，与「原文声称」对照。")
+    L.append("")
+    L.append("```python")
+    L.append("from math import sqrt, log, log2, log10, exp, sin, cos, pi, e")
+    L.append("")
+    for i, rec in enumerate(items, 1):
+        expr = str(rec.get("expr", "")).strip()
+        syms = rec.get("symbols") or {}
+        value = rec.get("value")
+        L.append(f"# ── 算式 {i}：{rec.get('claim', '')} ──")
+        L.append(f"# 原文声称：{rec.get('expected', '')}")
+        if value is not None and expr:
+            for k, v in syms.items():
+                L.append(f"{k} = {v}")
+            L.append(f"print({expr})  # -> {value}")
+        else:
+            L.append(f"# 未实算：{rec.get('note') or rec.get('status', '')}")
+        L.append("")
+    L.append("```")
+    L.append("")
+    L.append("## 实跑输出")
+    L.append("")
+    L.append("| # | 被验说法 | 表达式 | 实算 | 原文声称 | 判定 |")
+    L.append("|---|---|---|---|---|---|")
+    for i, rec in enumerate(items, 1):
+        val = str(rec.get("value")) if rec.get("value") is not None else (rec.get("note") or "—")
+        L.append(
+            f"| {i} | {_cell(rec.get('claim', ''), 36)} | {_cell(rec.get('expr', ''), 36)} "
+            f"| {_cell(val, 20)} | {_cell(rec.get('expected', ''), 22)} | {rec.get('status', '')} |"
+        )
+    L.append("")
+    return "\n".join(L)
 
 
 def _brief_verdict_line(c: dict) -> str:
@@ -1758,8 +1831,9 @@ def analyze(
         # 少了这一条「成稿」会永远停在「…」（v2.12 实测发现）。
         yield {"stage": "render", "status": "ok", "text": "报告已生成"}
         brief = render_brief(url, doc, triage, verify, calc, commentary)
+        calc_md = render_calc(calc)
         yield {"stage": "done", "status": "ok", "text": f"完成（{len(md)} 字符）",
-               "data": {"md": md, "brief": brief}}
+               "data": {"md": md, "brief": brief, "calc": calc_md}}
     except llm.LLMNotConfigured as exc:
         yield {"stage": "triage", "status": "fail", "text": str(exc)}
     except llm.LLMError as exc:
