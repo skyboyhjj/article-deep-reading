@@ -334,6 +334,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, body, "text/html; charset=utf-8")
             return
+        if path == "/og.jpg":
+            try:
+                body = (WEB / "og.jpg").read_bytes()
+            except OSError:
+                self._json(404, {"error": "not found"})
+                return
+            self._send(200, body, "image/jpeg")
+            return
         if path == "/api/health":
             self._json(200, {
                 "ok": True,

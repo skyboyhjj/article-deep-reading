@@ -113,6 +113,13 @@ class TestGet(Base):
         self.assertEqual(status, 200)
         self.assertEqual(body, request("GET", "/")[2])
 
+    def test_og_image_served(self):
+        # og:image 分享卡片图片必须能被公开访问（评估报告 4.2）。
+        status, headers, body = request("GET", "/og.jpg")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("Content-Type"), "image/jpeg")
+        self.assertEqual(body[:3], b"\xff\xd8\xff")
+
     def test_health_shape_and_no_secret(self):
         os.environ["LLM_API_KEY"] = "sk-should-never-appear"
         try:
