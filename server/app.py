@@ -23,7 +23,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 import asr
 import llm
@@ -316,7 +316,8 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------- 路由 ----------
     def do_GET(self) -> None:  # noqa: N802
-        if self.path in ("/", "/index.html"):
+        path = urlsplit(self.path).path
+        if path in ("/", "/index.html"):
             try:
                 body = (WEB / "index.html").read_bytes()
             except OSError:
@@ -324,7 +325,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, body, "text/html; charset=utf-8")
             return
-        if self.path == "/api/health":
+        if path == "/api/health":
             self._json(200, {
                 "ok": True,
                 "llm": llm.is_configured(),
@@ -342,7 +343,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json(404, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path == "/api/upload":
+        path = urlsplit(self.path).path
+        if path == "/api/upload":
             if not self._acquire_slot():
                 return
             try:
@@ -350,11 +352,11 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 _slots.release()
             return
-        if self.path == "/api/upload/drop":
+        if path == "/api/upload/drop":
             # 删掉自己刚上传的文件。不消耗额度（删除不该收费），也不占并发槽。
             self._handle_drop()
             return
-        if self.path != "/api/analyze":
+        if path != "/api/analyze":
             self._json(404, {"error": "not found"})
             return
 

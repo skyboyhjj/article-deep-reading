@@ -120,6 +120,14 @@ class TestGet(Base):
         self.assertEqual(status, 404)
         self.assertIn("not found", json.loads(body)["error"])
 
+    def test_query_string_stripped(self):
+        # 分享链接常带 utm / ref 等参数，路径匹配必须忽略 ? 之后的部分，
+        # 否则整条分享链路第一步就 404（评估报告 4.1）。
+        for path in ("/?utm_source=test", "/?from=share", "/index.html?ref=wx",
+                     "/api/health?x=1"):
+            status, _, _ = request("GET", path)
+            self.assertEqual(status, 200, f"GET {path} 应返回 200，实为 {status}")
+
 
 class TestAnalyzeValidation(Base):
     """这些分支都在进入 pipeline 之前返回，所以不花钱。"""
