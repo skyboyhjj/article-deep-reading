@@ -141,6 +141,14 @@ docker exec <redis容器> redis-cli SET dr:cfg:limit N
 docker exec <redis容器> redis-cli DEL dr:cfg:limit
 ```
 
+### 分享场景建议额度
+
+站点面向「分享给同事/群」使用，每 IP 额度不宜低于 **10 次/小时**（一人试两篇 + 分享 2~3 人各试一篇就接近打满）。代码默认值已是 10；线上曾以 `RATE_LIMIT_PER_HOUR=4` 启动，偏紧，可用热配置即时放宽（无需重建容器）：
+
+```bash
+docker exec <redis容器> redis-cli SET dr:cfg:limit 20
+```
+
 ### 键与盐（v2.20）
 
 Redis 里的键形如 `dr:rl:<32 位 hex>`，内容是 `sha256(RL_SALT + IP)` 的前 32 位，**不留明文 IP**。`RL_SALT` 由环境变量给出，默认 `deepread-v1`。

@@ -97,6 +97,17 @@ class TestGet(Base):
         self.assertIn("text/html", headers["Content-Type"])
         self.assertGreater(len(body), 500)
 
+    def test_security_headers(self):
+        status, headers, _ = request("GET", "/")
+        self.assertEqual(status, 200)
+        csp = headers.get("Content-Security-Policy", "")
+        self.assertIn("default-src 'none'", csp)
+        self.assertIn("script-src 'unsafe-inline'", csp)
+        self.assertEqual(headers.get("X-Frame-Options"), "DENY")
+        self.assertEqual(headers.get("Referrer-Policy"), "no-referrer")
+        self.assertEqual(headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertIn("camera=()", headers.get("Permissions-Policy", ""))
+
     def test_index_html_alias(self):
         status, _, body = request("GET", "/index.html")
         self.assertEqual(status, 200)
