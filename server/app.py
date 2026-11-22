@@ -172,16 +172,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Accel-Buffering", "no")  # 让 nginx 不缓冲
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Transfer-Encoding", "chunked")
+        # 不用 Transfer-Encoding: chunked：该头在 HTTP/2 下被禁止，nginx 反代时
+        # 会触发 ERR_HTTP2_PROTOCOL_ERROR。改用 Connection: close，响应结束于连接关闭。
+        self.send_header("Connection", "close")
         self.end_headers()
 
     def _sse(self, obj: dict) -> None:
         data = ("data: " + json.dumps(obj, ensure_ascii=False) + "\n\n").encode()
-        self.wfile.write(b"%x\r\n" % len(data) + data + b"\r\n")
+        self.wfile.write(data)
         self.wfile.flush()
 
     def _sse_close(self) -> None:
-        self.wfile.write(b"0\r\n\r\n")
         self.wfile.flush()
 
     # ---------- 客户端 IP ----------
