@@ -39,10 +39,24 @@ class TestSafeFilename(unittest.TestCase):
         self.assertEqual(media.safe_filename("/abs/path/a.mp4"), "a.mp4")
 
     def test_illegal_chars_replaced(self):
-        self.assertEqual(media.safe_filename("a b*c?.mp4"), "a_b_c_.mp4")
+        self.assertEqual(media.safe_filename("a b*c?.mp4"), "a b_c.mp4")
 
     def test_keeps_cjk(self):
-        self.assertEqual(media.safe_filename("视频 素材.mp4"), "视频_素材.mp4")
+        self.assertEqual(media.safe_filename("视频 素材.mp4"), "视频 素材.mp4")
+
+    def test_keeps_cjk_punctuation(self):
+        """中文标点会进报告标题，不该一律抹成下划线。"""
+        self.assertEqual(media.safe_filename("顾植山老师说阴平阳秘（上）.mp4"),
+                         "顾植山老师说阴平阳秘（上）.mp4")
+        self.assertEqual(media.safe_filename("《道德经》·第一章.mp4"),
+                         "《道德经》·第一章.mp4")
+
+    def test_trailing_punctuation_after_ext(self):
+        self.assertEqual(media.safe_filename("视频.mp4。"), "视频.mp4")
+        self.assertEqual(media.safe_filename("视频.mp4 "), "视频.mp4")
+
+    def test_fullwidth_dot_as_extension_separator(self):
+        self.assertEqual(media.safe_filename("视频．mp4"), "视频.mp4")
 
     def test_trims_leading_dots_and_underscores(self):
         self.assertEqual(media.safe_filename("...hidden.mp4"), "hidden.mp4")
@@ -53,13 +67,20 @@ class TestSafeFilename(unittest.TestCase):
         self.assertEqual(media.safe_filename("..."), "upload")
 
     def test_length_capped(self):
-        self.assertEqual(len(media.safe_filename("a" * 200 + ".mp4")), 80)
+        got = media.safe_filename("a" * 200 + ".mp4")
+        self.assertEqual(len(got), 80)
+        self.assertTrue(got.endswith(".mp4"), "截断不能吃掉扩展名")
 
     def test_windows_backslash_is_not_a_separator(self):
-        """Linux 上 basename 不认反斜杠，形状会变成 C:_x_a.mp4 —— 不致命但要知道。"""
-        got = media.safe_filename(r"C:\users\x\a.mp4")
-        self.assertNotIn("/", got)
-        self.assertNotIn("\\", got)
+        self.assertEqual(media.safe_filename(r"C:\users\x\a.mp4"), "a.mp4")
+
+    def test_ext_of(self):
+        self.assertEqual(media.ext_of("视频.MP4"), ".mp4")
+        self.assertEqual(media.ext_of("视频.mp4。"), ".mp4")
+        self.assertEqual(media.ext_of("视频．mp4"), ".mp4")
+        self.assertEqual(media.ext_of("evil.sh"), ".sh")
+        self.assertEqual(media.ext_of("无扩展名"), "")
+        self.assertEqual(media.ext_of("视频.mp4。.mp4"), ".mp4")
 
 
 class TestHasFfmpeg(unittest.TestCase):

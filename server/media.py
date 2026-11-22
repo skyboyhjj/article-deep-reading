@@ -111,10 +111,40 @@ def prepare(src: str | Path, workdir: str | Path,
             "seg_sec": max_sec, "fmt": fmt}
 
 
-_SAFE = re.compile(r"[^\w.\-]+")
+# 文件名只落在本地临时目录、不拼 shell，所以没必要把中文标点一律抹成下划线 ——
+# 它还会进报告标题（pipeline 用落盘名当 title）。这里只挡真正危险的东西：
+# 路径分隔符、Windows 非法字符、控制字符。
+_UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+_DOTS = re.compile(r"\.{2,}")
+# 尾部标点：'视频.mp4。' 这种带句号的，得先剥掉才能认出 .mp4
+_TAIL_JUNK = " \t\r\n\u3000。．，、；：！？）】》」』”’·…—,.!?;:-"
+MAX_NAME = 80
 
 
-def safe_filename(name: str, default: str = "upload") -> str:
-    base = os.path.basename(name or default)
-    base = _SAFE.sub("_", base).strip("._") or default
-    return base[:80]
+def ext_of(name: str) -> str:
+    """取扩展名并小写化，容忍尾部标点与全角点。
+
+    '视频.mp4。' → '.mp4'；'视频．mp4' → '.mp4'；'evil.sh' → '.sh'。
+    取不到返回 ''，是否拒绝由调用方决定。
+    """
+    base = os.path.basename(str(name or "").replace("\\", "/"))
+    norm = base.replace("．", ".").replace("。", ".")
+    norm = norm.rstrip(_TAIL_JUNK)
+    ext = os.path.splitext(norm)[1].lower()
+    return ext if re.fullmatch(r"\.[0-9a-z]+", ext) else ""
+
+
+def safe_filename(name: str, default: str = "upload", ext: str = "") -> str:
+    """清洗成可落盘的名字，同时尽量保住可读性。
+
+    先切扩展名再清洗主名（否则截断会把后缀吃掉），中文标点原样保留。
+    ext 可由调用方传入已校验的扩展名。
+    """
+    base = os.path.basename(str(name or default).replace("\\", "/"))
+    norm = base.replace("．", ".").replace("。", ".").rstrip(_TAIL_JUNK)
+    suffix = (ext or ext_of(base)).lower()
+    stem = norm[:-len(suffix)] if suffix and norm.lower().endswith(suffix) else norm
+    stem = _UNSAFE.sub("_", stem)
+    stem = _DOTS.sub(".", stem).strip(" ._-")
+    stem = stem[:MAX_NAME - len(suffix)] or default
+    return stem + suffix

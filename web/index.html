@@ -253,10 +253,11 @@
   </div>
 
   <div class="box">
-    <input id="url" type="url" inputmode="url" autocapitalize="off" autocorrect="off"
-           spellcheck="false" placeholder="请粘贴文章链接" autocomplete="off">
+    <input id="url" type="text" inputmode="url" autocapitalize="off" autocorrect="off"
+           spellcheck="false" placeholder="粘贴文章链接，或含链接的文字" autocomplete="off">
     <button id="go">慧惠读解</button>
   </div>
+  <div class="note" id="urlHint"></div>
 
   <details class="paste">
     <summary>不知道链接？直接粘贴内容</summary>
@@ -355,6 +356,22 @@ function resetStages(){
 function esc(s){
   return String(s == null ? "" : s)
     .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+/* 用户常把「推荐阅读：https://… 这篇不错」整段粘进来。
+   从文字里取出第一个链接，并剥掉尾部粘连的中文标点。 */
+const URL_RE = /https?:\/\/[^\s<>"'“”‘’（）\[\]【】]+/i;
+const URL_TAIL = /[。，、；：！？）》」』”’.,;:!?\]}>]+$/;
+function extractUrl(raw){
+  const s = String(raw == null ? "" : raw).trim();
+  const m = s.match(URL_RE);
+  if(!m) return "";
+  let u = m[0].replace(URL_TAIL, "");
+  // 括号保留在链接里（维基式 URL），只剥「多出来的」右括号
+  while(u.endsWith(")") && (u.split(")").length - 1) > (u.split("(").length - 1)){
+    u = u.slice(0, -1);
+  }
+  return u;
 }
 
 /* 极简 markdown 渲染：只覆盖本报告用到的语法。
@@ -514,12 +531,22 @@ function showExtract(d){
 
 async function run(){
   if(busy) return;
-  const url = $("url").value.trim();
+  const typed = $("url").value.trim();
   const text = $("ptext").value.trim();
   const title = $("ptitle").value.trim();
   const hasText = text.length >= 200;
-  if(!hasText && !uploadId && !/^https?:\/\//i.test(url)){
-    $("err").textContent = "请给链接、粘贴正文，或上传音视频";
+
+  // 文字里混着链接时取出来并回填，让「取了哪条」是可见的，而不是静默替换
+  let url = extractUrl(typed);
+  if(url && url !== typed){
+    $("url").value = url;
+    $("urlHint").textContent = "已从文字中提取链接，可自行修改";
+  }
+
+  if(!hasText && !uploadId && !url){
+    $("err").textContent = typed
+      ? "没在文字里找到链接（需以 http:// 或 https:// 开头）"
+      : "请给链接、粘贴正文，或上传音视频";
     return;
   }
 
@@ -619,6 +646,7 @@ document.querySelectorAll(".tab").forEach(t => {
 
 $("go").addEventListener("click", run);
 $("url").addEventListener("keydown", e => { if(e.key === "Enter") run(); });
+$("url").addEventListener("input", () => { $("urlHint").textContent = ""; });
 
 // 删掉自己上传的文件：删除不收费，服务端也不消耗额度
 $("dropBtn").addEventListener("click", async () => {

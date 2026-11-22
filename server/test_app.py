@@ -23,6 +23,7 @@ import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
+from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import app  # noqa: E402
@@ -289,6 +290,35 @@ class TestAnalyzeStream(Base):
             fake.unlink(missing_ok=True)
 
 
+class TestExtractUrl(unittest.TestCase):
+    """输入框允许整段文字，服务端也要能从里面认出链接。"""
+
+    def test_plain_url_unchanged(self):
+        u = "https://mp.weixin.qq.com/s/abc123"
+        self.assertEqual(app.extract_url(u), u)
+
+    def test_extracts_from_surrounding_text(self):
+        raw = "推荐阅读：https://mp.weixin.qq.com/s/abc123 这篇不错"
+        self.assertEqual(app.extract_url(raw), "https://mp.weixin.qq.com/s/abc123")
+
+    def test_strips_trailing_cjk_punctuation(self):
+        raw = "看这个 https://mp.weixin.qq.com/s/abc123。"
+        self.assertEqual(app.extract_url(raw), "https://mp.weixin.qq.com/s/abc123")
+
+    def test_no_url_returns_empty(self):
+        self.assertEqual(app.extract_url("只有一段文字，没有链接"), "")
+
+    def test_bare_domain_not_treated_as_url(self):
+        self.assertEqual(app.extract_url("mp.weixin.qq.com/s/abc"), "")
+
+    def test_keeps_balanced_parentheses(self):
+        u = "https://zh.wikipedia.org/wiki/Foo_(bar)"
+        self.assertEqual(app.extract_url(f"（见 {u}）"), u)
+
+    def test_drops_unbalanced_trailing_paren(self):
+        self.assertEqual(app.extract_url("(见 https://a.com/x)"), "https://a.com/x")
+
+
 class TestUpload(Base):
     def test_missing_content_length(self):
         status, _, body = request("POST", "/api/upload", body=b"",
@@ -329,6 +359,18 @@ class TestUpload(Base):
         self.assertTrue(saved, "上传件应落盘")
         self.assertEqual(saved[0].stat().st_size, len(blob))
         saved[0].unlink(missing_ok=True)
+
+    def test_accepts_punctuated_filename(self):
+        """带中文标点、扩展名后还有句号的文件名，不该再被判「不支持的类型」。"""
+        blob = b"\0" * 32
+        for raw in ("顾植山老师说阴平阳秘（上）.mp4", "视频.mp4。", "视频．mp4"):
+            status, _, body = request(
+                "POST", "/api/upload", body=blob,
+                headers={"Content-Length": str(len(blob)),
+                         "X-Filename": quote(raw)})
+            self.assertEqual(status, 200, f"{raw} → {body!r}")
+            name = json.loads(body)["name"]
+            self.assertTrue(name.endswith(".mp4"), name)
 
     def test_upload_rate_limited(self):
         blob = b"\0" * 16

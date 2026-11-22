@@ -16,6 +16,7 @@ import argparse
 import ipaddress
 import json
 import os
+import re
 import socket
 import tempfile
 import threading
@@ -74,6 +75,24 @@ CHUNK = 256 * 1024
 # 上传件的保留期。分析结束会立刻删；这条是兜底 —— 上传后没点「开始读解」的，
 # 最多留这么久。见 _sweep_uploads()。
 UPLOAD_TTL = int(os.environ.get("UPLOAD_TTL_HOURS", "24")) * 3600
+
+# 从混杂文本里挑链接：用户常把「推荐阅读：https://… 这篇不错」整段粘进来。
+# 只认带协议的 http(s)，避免把普通域名/邮箱误当链接。
+_URL_RE = re.compile(r"https?://[^\s<>\"'“”‘’（）\[\]【】]+", re.I)
+_URL_TAIL = "。，、；：！？）》」』”’.,;:!?]>}"
+
+
+def extract_url(raw) -> str:
+    """取第一个链接；纯链接原样返回，取不到返回空串。"""
+    text = str(raw or "").strip()
+    m = _URL_RE.search(text)
+    if not m:
+        return text if text.startswith(("http://", "https://")) else ""
+    url = m.group(0).rstrip(_URL_TAIL)
+    # 括号保留在链接里（维基式 URL），只剥「多出来的」右括号，如 "见（…）" 的收尾
+    while url.endswith(")") and url.count(")") > url.count("("):
+        url = url[:-1]
+    return url
 
 
 def _sweep_uploads(now: float | None = None) -> int:
@@ -248,12 +267,12 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         raw_name = unquote(self.headers.get("X-Filename") or "upload")
-        name = media.safe_filename(raw_name)
-        ext = Path(name).suffix.lower()
+        ext = media.ext_of(raw_name)
         if ext not in ALLOWED_EXT:
             self._json(400, {"error": f"不支持的文件类型 {ext or '(无扩展名)'}；"
                                       f"可选：{', '.join(sorted(ALLOWED_EXT))}"})
             return
+        name = media.safe_filename(raw_name, ext=ext)
 
         ok, left, state, retry_after = LIMITER.allow(self._client_ip())
         if not ok:
@@ -399,7 +418,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "JSON 解析失败"})
             return
 
-        url = str(payload.get("url", "")).strip()
+        url = extract_url(payload.get("url", ""))
         pasted = str(payload.get("text", ""))
         ptitle = str(payload.get("title", ""))
         upload_id = str(payload.get("upload_id", "")).strip()
