@@ -149,6 +149,8 @@ docker exec <redis容器> redis-cli DEL dr:cfg:limit
 docker exec <redis容器> redis-cli SET dr:cfg:limit 20
 ```
 
+> 注意：热配置即时生效，但**不落盘到 compose**。若用热配置放宽额度，也要同步把 `docker-compose.yml` 的 `RATE_LIMIT_PER_HOUR` 改成同样值——否则重建容器时热配置若失效（如 Redis 键被清/过期），会静默退回 compose 里写死的旧值（如 4），限流又变紧。改额度记住「两处同步」。
+
 ### 键与盐（v2.20）
 
 Redis 里的键形如 `dr:rl:<32 位 hex>`，内容是 `sha256(RL_SALT + IP)` 的前 32 位，**不留明文 IP**。`RL_SALT` 由环境变量给出，默认 `deepread-v1`。
