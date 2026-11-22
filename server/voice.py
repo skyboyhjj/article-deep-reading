@@ -21,8 +21,10 @@ from pathlib import Path
 
 try:
     import numpy as np
+    from numpy.lib.stride_tricks import as_strided
 except ImportError:  # pragma: no cover
     np = None
+    as_strided = None
 
 # 各地方言的高辨识度用词。只收「单独出现就基本能定位」的，
 # 像「啥」这种全国通用的不收，否则满篇误报。
@@ -97,8 +99,12 @@ def _analyze(x, sr) -> dict:
     dur = x.size / sr
     win, hop = int(0.025 * sr), int(0.010 * sr)
     n = max(1, (x.size - win) // hop + 1)
-    idx = np.arange(win)[None, :] + hop * np.arange(n)[:, None]
-    frames = x[idx]
+    # 用步长视图取重叠帧，不物化索引矩阵与帧副本。旧写法 idx(int64, n×win)
+    # + frames(float32, n×win) + frames**2 三份临时数组，长视频切成 3 片时峰值
+    # 冲上 ~210MB，撞破容器 256MB 上限被 OOM 杀掉（前端就卡在「转写中」）。
+    frames = as_strided(x, shape=(n, win),
+                        strides=(hop * x.strides[0], x.strides[0]),
+                        writeable=False)
     rms = np.sqrt((frames ** 2).mean(axis=1) + 1e-12)
 
     # 静音阈值。不能用「低分位 × 常数」—— 当静音段不到 15% 时，低分位本身
