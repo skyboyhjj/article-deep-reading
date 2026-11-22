@@ -8,3 +8,6 @@ venv/
 .DS_Store
 output/
 *.md.bak
+
+# 本地私有技能，不随仓库分发
+skills/deepread-ops/
