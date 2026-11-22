@@ -10,8 +10,10 @@ COPY --from=ffmpeg /ffprobe /usr/local/bin/ffprobe
 WORKDIR /app
 
 # 只装运行时依赖；技能脚本的额外依赖（fonttools/weasyprint）不在服务路径上
+# PIP_INDEX_URL 可覆盖 pip 源；国内部署传 https://mirrors.aliyun.com/pypi/simple/ 加速
+ARG PIP_INDEX_URL=https://pypi.org/simple
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -i ${PIP_INDEX_URL} -r requirements.txt
 
 COPY server/ server/
 COPY web/ web/
