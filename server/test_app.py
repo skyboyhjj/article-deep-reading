@@ -343,9 +343,12 @@ class TestAnalyzeValidation(Base):
         status, _, body = post_json("/api/analyze", {"text": "字" * 200_001})
         self.assertEqual(status, 400)
         obj = json.loads(body)
+        # 撞的是字节闸（DR-1002），不是字符闸（DR-1006）——中文 20 万字符 = 60 万字节
         self.assertEqual(obj["code"], "DR-1002")
-        self.assertIn("8.6 万", obj["error"])
-        self.assertIn("分段", obj["hint"])
+        # 验「上限数字真的说了出来」，但绑常量不绑文案：文案可改，常量不该漂
+        kb = f"{round(app.BODY_LIMIT / 1024)} KB"
+        self.assertIn(kb, obj["error"], "上限数字没落进文案，用户会对着「20 万字符」白贴一遍")
+        self.assertNotIn("{", obj["error"] + obj["hint"], "占位符没被替换，用户会看到花括号")
 
     def test_unknown_post_path(self):
         status, _, _ = post_json("/api/nope", {})

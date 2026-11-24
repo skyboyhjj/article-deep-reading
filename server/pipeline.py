@@ -1714,7 +1714,13 @@ def analyze(
                 voice_duration = float(prep.get("duration") or 0)
             except Exception:      # noqa: BLE001  画像失败绝不影响主流程
                 voice_acoustic, voice_duration = None, 0.0
-        except (media.MediaError, asr.ASRError) as exc:
+        except media.MediaError as exc:
+            # 文件本身读不出来（格式/损坏/缺 ffmpeg）—— 与「模型转写失败」分开，
+            # 用户动作不同：这条该换格式重传，那条该等等再试。
+            yield {"stage": "transcribe", "status": "fail", "code": "DR-4005",
+                   "text": f"这个文件读不出来：{exc}"}
+            return
+        except asr.ASRError as exc:
             yield {"stage": "transcribe", "status": "fail", "code": "DR-4004",
                    "text": f"转写失败：{exc}"}
             return

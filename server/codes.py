@@ -46,7 +46,8 @@ CODES: Final[dict[str, Code]] = {
                   "内容太大（上限 {limit}）", "{advice}", False, "user", False),
     "DR-1003": _c("DR-1003", "malformedJson", "pre", 400,
                   "请求格式有误", "刷新页面后重试", True, "user", False),
-    "DR-1004": _c("DR-1004", "noInput", "pre", 400,
+    # 1004 两态都用：流前 app 校验会发它，pipeline 的 extract 阶段也会发
+    "DR-1004": _c("DR-1004", "noInput", "both", 400,
                   "没有可读解的内容", "提供链接、粘贴正文，或上传音视频", False, "user", False),
     "DR-1005": _c("DR-1005", "textTooShort", "pre", 400,
                   "正文太短（不足 200 字）", "粘贴完整内容，或改用链接 / 上传音视频",

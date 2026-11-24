@@ -37,6 +37,14 @@ jobs:
       - name: 错误码表（25 码 / 占位符 / 展示口径）
         run: python server/test_codes.py
 
+      # ── 五道守门：文档↔码表 / 错误返回带码 / 每码有触发用例 / 文案不入断言 / 两态 ──
+      - name: 五道守门（P3）
+        run: python server/test_guards.py
+
+      # ── 流水线错误路径：4001 / 4003 / 4004 / 4005 / 4006 各走一次 ──
+      - name: 流水线错误路径
+        run: python server/test_pipeline_codes.py
+
       # ── HTTP 层：真起服务、打真请求；analyze 用假 pipeline，不花钱 ──
       - name: HTTP 层（路由 / 校验 / 限流 / SSE 收尾）
         run: python server/test_app.py

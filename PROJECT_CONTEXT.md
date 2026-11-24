@@ -8,9 +8,9 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.30**（2026-11-24）
+- 当前版本：**v2.31**（2026-11-24）
 
-核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、18 套 CI 测试。
+核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、20 套 CI 测试。
 
 `skills/` 与 `server/` 是**同一套方法的两副形态**：前者给平台内的助手用（纯提示词 + 脚本），后者给人用（能跑的服务）。
 
@@ -523,6 +523,15 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **踩到的坑**：v2.28 加了 `test_codes.py` 却没往 workflow 里加步骤，守门一直没上岗（v2.30 补上，`18 套 CI` 由此而来）
 - **测试**：`test_app` 73、`test_codes` 61、`test_ui_contract` 35（含「`APP_VERSION` 与 CHANGELOG 首个版本号一致，防发版漏改」与「版本注释点名的测试文件必须真的存在，防注释指向一个空名字」）
 - **文件**：`server/codes.py`、`server/app.py`、`server/test_app.py`、`server/test_codes.py`、`server/test_ui_contract.py`、`web/index.html`、`.github/workflows/ci.yml`
+
+### 37. 错误体系 P3：码表文档与五道守门（v2.31）
+
+- **做了什么**：`docs/ERROR_CODES.md`（25 码一码一段，四行：用户看到 / 触发 / 何时加 / 排障）；`server/test_guards.py` 五道守门接入 CI；新增 `server/test_pipeline_codes.py` 补五条流水线错误路径
+- **关键判断**：守门三（每码都有触发用例）只认**断言语境**里的码——`code == "DR-x"` / `"code": "DR-x"` / `assertEqual/assertIn(..., "DR-x")`。第一版扫全文，被一行注释就骗过去了（实测：把用例改成别的码、注释留着 4005，守门仍绿）
+- **守门逼出的两个真问题**：①DR-4005 是死码——`media.MediaError` 原本被并进 DR-4004，`pipeline.py` 里拆开（文件读不出 → 4005，转写失败 → 4004）；②DR-1004 的 scope 标 `pre`，但 pipeline 的 extract 阶段也发它，改 `both`
+- **守门四的活**：抓到 `test_app` 里还绑着文案「8.6 万」，改为绑 `BODY_LIMIT` 常量——改文案不再牵连测试
+- **测试**：`test_guards` 11 项、`test_pipeline_codes` 8 项；五道守门全部做过反向验证（改坏即红）
+- **文件**：`docs/ERROR_CODES.md`、`server/test_guards.py`、`server/test_pipeline_codes.py`、`server/pipeline.py`、`server/codes.py`、`server/app.py`、`.github/workflows/ci.yml`
 
 ## 待办
 
