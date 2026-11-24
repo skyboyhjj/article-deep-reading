@@ -521,7 +521,7 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **顺手修掉的吞错**：前端 `handleEvent` 里 `stage === "error"` 直接 return —— 服务端兜底错误帧从来没显示过。现在 `error` 帧走正常 fail 分支
 - **流中帧与流前 JSON 同源**：都走 `codes.payload()`，字段一字不差；帧里 `text` 改写为「人话 + 改法」，pipeline 兜底帧的 `内部错误：KeyError: xxx` 不再上页面
 - **踩到的坑**：v2.28 加了 `test_codes.py` 却没往 workflow 里加步骤，守门一直没上岗（v2.30 补上，`18 套 CI` 由此而来）
-- **测试**：`test_app` 73、`test_codes` 61、`test_ui_contract` 33
+- **测试**：`test_app` 73、`test_codes` 61、`test_ui_contract` 34（含「`APP_VERSION` 与 CHANGELOG 首个版本号一致」，防发版漏改）
 - **文件**：`server/codes.py`、`server/app.py`、`server/test_app.py`、`server/test_codes.py`、`server/test_ui_contract.py`、`web/index.html`、`.github/workflows/ci.yml`
 
 ## 待办

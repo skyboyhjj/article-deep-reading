@@ -397,5 +397,21 @@ class TestErrorPresentation(unittest.TestCase):
                 f"{sel} 对比度 {ratio} < 4.5（{r['color']} on {r['background']}）")
 
 
+class TestVersion(unittest.TestCase):
+    """版本号只该有一个真源。
+
+    `APP_VERSION` 出去的地方有三处（`/api/health`、SSE 首帧、用户复制的诊断信息），
+    而发版时最容易忘的是 CHANGELOG。任其漂开，用户报障时报的版本就对不上代码。
+    """
+
+    def test_app_version_matches_changelog(self):
+        import app
+        changelog = (HERE.parent / "CHANGELOG.md").read_text(encoding="utf-8")
+        m = re.search(r"^## v([\d.]+) ·", changelog, re.M)
+        self.assertTrue(m, "CHANGELOG 里找不到 `## vX.Y ·` 形式的首个版本标题")
+        self.assertEqual(m.group(1), app.APP_VERSION,
+                         "CHANGELOG 首个版本号与 app.APP_VERSION 不一致，发版时漏改了一处")
+
+
 if __name__ == "__main__":
     unittest.main()
