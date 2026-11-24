@@ -13,8 +13,10 @@
 """
 from __future__ import annotations
 
+import ast
 import re
 import sys
+from pathlib import Path
 
 import asr
 import codes
@@ -158,6 +160,67 @@ shared = {c: ks for c, ks in by_cond.items() if len(ks) > 1}
 chk("incompleteRequest 由 DR-1001 与 DR-2001 共用",
     shared.get("incompleteRequest") == ["DR-1001", "DR-2001"], str(shared.get("incompleteRequest")))
 chk("共用 condition 的码组只有这一组", list(shared) == ["incompleteRequest"], str(list(shared)))
+
+print()
+print("=" * 70)
+print("六、文案占位符 ↔ 调用点实参（静态扫 AST）")
+print("=" * 70)
+# 来由：DR-3001 的 hint 写的是「约 {minutes} 分钟后恢复」，而设计文档 3.2.1 的示例
+# 只传了 retry_in_seconds。str.format 缺 key 会 KeyError（崩），多传的 key 会被
+# 静默忽略（文案退化成没数字的死句）。两种都靠人眼看不出来，故用静态扫描守。
+RESERVED = {"headers", "write_body", "retry_in_seconds", "log_exc"}
+PH = re.compile(r"\{(\w+)\}")
+HERE = Path(__file__).resolve().parent
+
+sites: dict[str, list[set[str] | None]] = {}
+for fname in ("app.py", "pipeline.py"):
+    try:
+        tree = ast.parse((HERE / fname).read_text(encoding="utf-8"))
+    except (OSError, SyntaxError) as exc:
+        chk(f"{fname} 可解析", False, str(exc))
+        continue
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        a0 = node.args[0]
+        if not (isinstance(a0, ast.Constant) and isinstance(a0.value, str)
+                and a0.value.startswith("DR-")):
+            continue
+        if any(k.arg is None for k in node.keywords):
+            sites.setdefault(a0.value, []).append(None)      # **kwargs 透传，静态判不了
+        else:
+            sites.setdefault(a0.value, []).append(
+                {k.arg for k in node.keywords} - RESERVED)
+
+need_report = {k: sorted(set(PH.findall(c.message + c.hint)))
+               for k, c in codes.CODES.items() if PH.search(c.message + c.hint)}
+print(f"  有占位符的码 {len(need_report)} 个："
+      + "，".join(f"{k}{v}" for k, v in need_report.items()))
+
+missing_key = []
+for k, need in need_report.items():
+    got = sites.get(k)
+    if not got:
+        missing_key.append(f"{k} 需要 {need} 但 app/pipeline 无调用点")
+        continue
+    for kw in got:
+        if kw is not None and set(need) - kw:
+            missing_key.append(f"{k} 调用缺 {sorted(set(need) - kw)}")
+chk("模板要的占位符调用点都传了", not missing_key, "; ".join(missing_key))
+
+extra_key = []
+for k, kwlist in sites.items():
+    if k not in codes.CODES:
+        continue
+    need = set(PH.findall(codes.CODES[k].message + codes.CODES[k].hint))
+    for kw in kwlist:
+        if kw is not None and kw - need:
+            extra_key.append(f"{k} 多传 {sorted(kw - need)}（会被 str.format 静默忽略）")
+chk("调用点不多传无用实参", not extra_key, "; ".join(extra_key))
+
+q = codes.payload("DR-3001", limit=20, minutes=12)
+chk("DR-3001 分钟与秒同源（hint 说分钟，body 给秒）",
+    "12" in q["hint"] and q["code"] == "DR-3001", q["hint"])
 
 print()
 print("=" * 70)

@@ -510,7 +510,9 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **关键判断**：`Retry-After`（头）与 `retry_in_seconds`（体）必须同时给，不是同一件事的两种写法
 - **踩到的坑**：`b"a" b"x" * 10` 在 Python 里先隐式连接再乘，等于 `b"ax" * 10`——写「声明 100 字节只发 10 字节」的测试时被它骗了一轮，服务端读满 100 返回 200。必须写成 `b"a" + b"x" * 10`
 - **测试**：`test_app` 65 → 70；21 处文案断言全迁码断言；25 个码均有触发用例
-- **文件**：`server/app.py`、`server/pipeline.py`、`server/test_app.py`、`CHANGELOG.md`
+- **补测（评审反馈触发）**：`test_codes` 第六节用 AST 静态扫 `_fail("DR-xxxx", …)` 的实参，与码表模板占位符双向比对——缺 key 会 `KeyError`、多传 key 被 `str.format` 静默忽略，两种都报。反向验证：删 `minutes=` 实参该项立即变红
+- **DR-3001 的分钟口径**：hint 写「约 `{minutes}` 分钟后恢复」，body 给 `retry_in_seconds`，两者必须同由 `sec` 派生（`minutes=max(1, round(sec / 60))`），不许各算一套
+- **文件**：`server/app.py`、`server/pipeline.py`、`server/test_app.py`、`server/test_codes.py`、`CHANGELOG.md`
 
 ## 待办
 
