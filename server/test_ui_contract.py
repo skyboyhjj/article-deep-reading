@@ -412,6 +412,22 @@ class TestVersion(unittest.TestCase):
         self.assertEqual(m.group(1), app.APP_VERSION,
                          "CHANGELOG 首个版本号与 app.APP_VERSION 不一致，发版时漏改了一处")
 
+    def test_version_comment_names_a_real_test_file(self):
+        """注释里点名的测试文件必须真的在。
+
+        来由：app.py 的版本注释曾写「test_web 会比对」，而实际测试落在本文件，
+        读者按注释去找 test_web.py 找不到，就会误判「这个守门不存在」。
+        注释指向哪儿，哪儿就得有东西。
+        """
+        src = (HERE / "app.py").read_text(encoding="utf-8")
+        m = re.search(r"#.*CHANGELOG.*同号（(.*?)）", src)
+        self.assertTrue(m, "app.py 里找不到「CHANGELOG 首个标题必须同号」的注释")
+        names = set(re.findall(r"(test_[a-z_]+)", m.group(1)))
+        self.assertTrue(names, "注释里没点名任何测试文件")
+        for name in names:
+            self.assertTrue((HERE / f"{name}.py").exists(),
+                            f"注释指向 {name}.py，但 server/ 下没有这个文件")
+
 
 if __name__ == "__main__":
     unittest.main()

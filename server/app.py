@@ -68,7 +68,7 @@ BODY_LIMIT = 260_000
 DRAIN_MAX = 5 * 1024 * 1024
 
 # 版本号：/api/health 与 SSE 首帧都带上，用户复制的诊断信息里就有它。
-# 发版时改这一处，CHANGELOG 首个标题必须同号（test_web 会比对，防漂）。
+# 发版时改这一处，CHANGELOG 首个标题必须同号（test_ui_contract.TestVersion 会比对，防漂）。
 APP_VERSION = "2.30"
 
 # 上传：用户自己导出视频号视频后传上来，是拿到「原声」的唯一可靠路径
