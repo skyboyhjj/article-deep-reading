@@ -59,9 +59,10 @@
   .h1-tail{white-space:nowrap}
   .sub{color:var(--ink-soft);font-size:15px;margin:0 0 8px;line-height:1.78;font-style:italic}
   .guide{color:var(--muted);font-size:13.5px;margin:0;letter-spacing:1px}
-  .box{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}
+  .box{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px;align-items:flex-start}
   #url{
     flex:1 1 420px;min-width:0;padding:13px 15px;font-size:16px;
+    line-height:1.7;resize:none;overflow:hidden;
     border:1px solid var(--line);border-radius:9px;background:var(--card);
     font-family:inherit;color:var(--fg);
   }
@@ -253,8 +254,8 @@
   </div>
 
   <div class="box">
-    <input id="url" type="text" inputmode="url" autocapitalize="off" autocorrect="off"
-           spellcheck="false" placeholder="粘贴文章链接，或含链接的文字" autocomplete="off">
+    <textarea id="url" rows="2" inputmode="url" autocapitalize="off" autocorrect="off"
+           spellcheck="false" placeholder="粘贴文章链接，或含链接的文字" autocomplete="off"></textarea>
     <button id="go">慧惠读解</button>
   </div>
   <div class="note" id="urlHint"></div>
@@ -645,8 +646,23 @@ document.querySelectorAll(".tab").forEach(t => {
 });
 
 $("go").addEventListener("click", run);
-$("url").addEventListener("keydown", e => { if(e.key === "Enter") run(); });
-$("url").addEventListener("input", () => { $("urlHint").textContent = ""; });
+/* 多行框里回车是换行；提交改 Ctrl/⌘ + 回车，或点按钮 */
+$("url").addEventListener("keydown", e => {
+  if(e.key === "Enter" && (e.ctrlKey || e.metaKey)) run();
+});
+$("url").addEventListener("input", () => {
+  autosizeUrl();
+  $("urlHint").textContent = "";
+});
+
+/* 网址框随内容长高：单行链接 2 行起步，贴进含链接的文字也不挤 */
+function autosizeUrl(){
+  const el = $("url");
+  const MAX = 200;   // 最高约 6 行，再长内部滚动，别把页面撑破
+  el.style.height = "auto";
+  el.style.height = Math.min(el.scrollHeight, MAX) + "px";
+  el.style.overflowY = el.scrollHeight > MAX ? "auto" : "hidden";
+}
 
 // 删掉自己上传的文件：删除不收费，服务端也不消耗额度
 $("dropBtn").addEventListener("click", async () => {
