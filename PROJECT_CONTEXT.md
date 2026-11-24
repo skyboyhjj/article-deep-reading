@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.31**（2026-11-24）
+- 当前版本：**v2.32**（2026-11-24）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、20 套 CI 测试。
 
@@ -532,6 +532,15 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **守门四的活**：抓到 `test_app` 里还绑着文案「8.6 万」，改为绑 `BODY_LIMIT` 常量——改文案不再牵连测试
 - **测试**：`test_guards` 11 项、`test_pipeline_codes` 8 项；五道守门全部做过反向验证（改坏即红）
 - **文件**：`docs/ERROR_CODES.md`、`server/test_guards.py`、`server/test_pipeline_codes.py`、`server/pipeline.py`、`server/codes.py`、`server/app.py`、`.github/workflows/ci.yml`
+
+### 38. P2 收尾：异常摘要改走 log_exc（v2.32）
+
+- **做了什么**：pipeline 的 7 处 fail 帧与 2 处报告 notes 不再拼 `{exc}` / `str(exc)` / `type(exc).__name__`；摘要转进帧字段 `log_exc`，由 `app._enrich_fail` 摘下喂给 `_log_error`
+- **关键判断**：v2.30 靠「app 覆盖帧 text」兜底，看着够用；但那是唯一防线，换个出口或换人接手就漏。现在源码层就没有 exc 上页面的路径，app 再摘一次，两头都不靠对方
+- **真泄漏的那一处**：报告头「页面抓取失败（{exc}），只用了上传的音视频」——`notes` 进报告、app 不覆盖，用户直接看得见。这条比帧 text 更要紧
+- **新增守门八**（`test_guards`，3 项）：`text` / `message` / `hint` / `notes` 不许插 exc；帧必须带 `log_exc`；app 必须 pop 并喂日志——三项均反向验证
+- **配套测试**：`test_stream_fail_logs_internal_summary`——页面没有、日志有，两头都要成立（只做前半，排障就只剩一个码）
+- **文件**：`server/pipeline.py`、`server/app.py`、`server/test_guards.py`、`server/test_app.py`
 
 ## 待办
 

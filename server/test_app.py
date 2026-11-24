@@ -11,6 +11,7 @@
 `pipeline.analyze` 替换，只验 SSE 的形状与收尾。
 """
 import http.client
+import io
 import socket
 import ipaddress
 import json
@@ -23,6 +24,7 @@ import time
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from contextlib import redirect_stdout
 from unittest import mock
 from urllib.parse import quote
 
@@ -413,6 +415,24 @@ class TestAnalyzeStream(Base):
         self.assertIn('"code": "DR-5003"', text)
         self.assertIn("服务异常", text)
         self.assertNotIn("模型挂了", text)   # 内部细节只进日志，不上页面
+
+    def test_stream_fail_logs_internal_summary(self):
+        """异常摘要的两头：页面上不许有，日志里必须有。
+
+        只做到「不上页面」还不够——把摘要彻底丢掉，排障时只剩一个码。
+        所以帧带 `log_exc`，app 摘下来喂日志，帧本身不带出去。
+        """
+        ev = {"stage": "triage", "status": "fail", "code": "DR-4002",
+              "log_exc": "LLMError: timeout after 60s"}
+        buf = io.StringIO()
+        with mock.patch.object(app.pipeline, "analyze", self._fake(ev)), \
+                redirect_stdout(buf):
+            status, _, body = post_json("/api/analyze", {"url": "https://example.com/f"})
+        self.assertEqual(status, 200)
+        page = body.decode()
+        self.assertNotIn("timeout after 60s", page)          # 不上页面
+        self.assertNotIn("log_exc", page)                    # 连字段名都不出去
+        self.assertIn("timeout after 60s", buf.getvalue())   # 但日志里要有
 
     def test_rate_limit_blocks_second_call(self):
         with mock.patch.object(app, "LIMITER", ratelimit.MemoryRateLimiter(1)), \

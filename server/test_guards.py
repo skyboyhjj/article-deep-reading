@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""五道机器守门（设计文档第十二节，P3 落地）。
+"""八道机器守门（设计文档第十二节）。
 
-设计里说「新增一条错误路径但忘配码，CI 红」——那话要成立，才叫守门。这五条
-就是把它兑现：文档↔码表、源码↔码、码↔用例、用例↔文案、两态↔调用位置。
+设计里说「新增一条错误路径但忘配码，CI 红」——那话要成立，才叫守门。这八条
+就是把它兑现：文档↔码表、源码↔码、码↔用例、用例↔文案、两态↔调用位置，
+外加 P2 收尾补的一条：上页面的文案不许插异常摘要。
 
 跑法：python3 server/test_guards.py
 退出码：0 全通过 / 1 有失败
@@ -222,6 +223,64 @@ appeared = {c for c, _, _ in pre_side} | {c for c, _, _ in in_side}
 dead = sorted(set(codes.CODES) - appeared)
 chk("码表里没有死码（每个码都有实际发出的地方）", not dead, f"从未发出：{dead}")
 
+# ============ 守门八：页面文案不带异常摘要 ============
+print()
+print("=" * 70)
+print("守门八：上页面的文案不插异常（text / notes）")
+print("=" * 70)
+
+
+def _names(node) -> set[str]:
+    return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+
+
+def _exc_leaks(src: str, fname: str) -> list[str]:
+    """字典里的 text / notes 若插了 exc，就会把内部异常带上页面。
+
+    v2.31 之前 pipeline 的帧 text 直接拼 `{exc}`，靠 app 覆盖 text 兜底——
+    这层依赖太脆（换个出口就漏）。现在异常摘要走帧字段 `log_exc`，
+    app 摘下来喂日志；源码里不该再有第二条上页面的路。
+    """
+    tree = ast.parse(src)
+    bad: list[str] = []
+
+    def check(node, where: str, lineno: int) -> None:
+        if not isinstance(node, ast.JoinedStr):
+            return
+        for v in node.values:
+            if not isinstance(v, ast.FormattedValue):
+                continue
+            names = _names(v.value)
+            if "exc" in names or "type" in names:
+                bad.append(f"{fname}:{lineno} {where} 插了异常")
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        for k, v in zip(node.keys, node.values):
+            if not (isinstance(k, ast.Constant) and isinstance(k.value, str)):
+                continue
+            if k.value in ("text", "message", "hint"):
+                check(v, k.value, node.lineno)
+            elif k.value == "notes" and isinstance(v, ast.List):
+                for e in v.elts:
+                    check(e, "notes", node.lineno)
+    return bad
+
+
+leaks = _exc_leaks(_src("pipeline.py"), "pipeline.py") + _exc_leaks(_src("app.py"), "app.py")
+chk("页面文案没有异常插值", not leaks, "; ".join(leaks))
+
+# 异常摘要必须有地方去：pipeline 的 fail 帧该带 log_exc，app 该摘下来喂日志。
+# 否则「不上页面」就变成「彻底丢掉」，排障时只剩一个码。
+pipe_src = _src("pipeline.py")
+app_src = _src("app.py")
+chk("pipeline 的 fail 帧带 log_exc", pipe_src.count('"log_exc"') >= 5,
+    f'只找到 {pipe_src.count(chr(34) + "log_exc" + chr(34))} 处')
+chk("app 把 log_exc 摘下来进日志",
+    'ev.pop("log_exc"' in app_src and "self._log_error(200, ev[\"code\"], exc)" in app_src,
+    "摘了但没喂日志，或根本没用 pop")
+
 print()
 print("=" * 70)
 if FAILS:
@@ -229,4 +288,4 @@ if FAILS:
     for f in FAILS:
         print(f"  - {f}")
     sys.exit(1)
-print("五道守门全部通过")
+print("八道守门全部通过")

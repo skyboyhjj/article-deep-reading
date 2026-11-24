@@ -1664,12 +1664,13 @@ def analyze(
         except extract.FetchError as exc:
             if not has_media:
                 yield {"stage": "extract", "status": "fail", "code": "DR-4003",
-                       "text": f"抓取失败：{exc}（可改用「粘贴正文」或上传音视频）"}
+                       "text": "这个链接抓不到内容。改用「粘贴正文」，或上传音视频",
+                       "log_exc": f"{type(exc).__name__}: {exc}"}
                 return
             doc = {
                 "url": url, "kind": "video_upload", "title": pasted_title or media_name,
                 "authors": [], "published": "", "text": "", "n_chars": 0,
-                "notes": [f"页面抓取失败（{exc}），只用了上传的音视频"],
+                "notes": ["页面抓取失败，只用了上传的音视频"],
             }
     else:
         yield {"stage": "extract", "status": "fail", "code": "DR-1004",
@@ -1718,11 +1719,13 @@ def analyze(
             # 文件本身读不出来（格式/损坏/缺 ffmpeg）—— 与「模型转写失败」分开，
             # 用户动作不同：这条该换格式重传，那条该等等再试。
             yield {"stage": "transcribe", "status": "fail", "code": "DR-4005",
-                   "text": f"这个文件读不出来：{exc}"}
+                   "text": "这个文件读不出来。换格式重传",
+                   "log_exc": f"{type(exc).__name__}: {exc}"}
             return
         except asr.ASRError as exc:
             yield {"stage": "transcribe", "status": "fail", "code": "DR-4004",
-                   "text": f"转写失败：{exc}"}
+                   "text": "音视频转写失败。换一个文件，或粘贴正文",
+                   "log_exc": f"{type(exc).__name__}: {exc}"}
             return
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
@@ -1848,10 +1851,13 @@ def analyze(
         yield {"stage": "done", "status": "ok", "text": f"完成（{len(md)} 字符）",
                "data": {"md": md, "brief": brief, "calc": calc_md}}
     except llm.LLMNotConfigured as exc:
-        yield {"stage": "triage", "status": "fail", "code": "DR-4001", "text": str(exc)}
+        yield {"stage": "triage", "status": "fail", "code": "DR-4001", "text": "服务端尚未配置模型。把这个诊断信息发给我们",
+               "log_exc": f"{type(exc).__name__}: {exc}"}
     except llm.LLMError as exc:
         yield {"stage": "triage", "status": "fail", "code": "DR-4002",
-               "text": f"模型调用失败：{exc}"}
+               "text": "模型调用失败。稍后重试（已自动重试 2 次）",
+               "log_exc": f"{type(exc).__name__}: {exc}"}
     except Exception as exc:  # noqa: BLE001
         yield {"stage": "triage", "status": "fail", "code": "DR-5003",
-               "text": f"内部错误：{type(exc).__name__}: {exc}"}
+               "text": "服务异常。把这个诊断信息发给我们",
+               "log_exc": f"{type(exc).__name__}: {exc}"}
