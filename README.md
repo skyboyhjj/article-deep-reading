@@ -99,7 +99,7 @@ $env:LLM_API_KEY="sk-..."
 python server/app.py -p 8123
 ```
 
-自检（17 套，全部不花钱、不联网）：
+自检（20 套，全部不花钱、不联网）：
 
 ```bash
 python3 -m unittest server.test_ratelimit server.test_app   # 限流 + HTTP 层，52 项
@@ -107,7 +107,7 @@ python3 server/test_pipeline_e2e.py                        # 五阶段数据流�
 python3 server/test_safe_eval.py                           # 求值器：12 正确 + 18 攻击 + 5 失败
 ```
 
-全量命令与每套的期望输出见 [`docs/TESTING.md`](docs/TESTING.md)（17 套 / 396 个断言点）。
+全量命令与每套的期望输出见 [`docs/TESTING.md`](docs/TESTING.md)（20 套 / 532 个断言点）。
 
 ---
 
@@ -364,7 +364,9 @@ article-deep-reading/
 └── docs/
     ├── SOP.md                  ← 方法本体：七步流程与踩坑清单
     ├── ARCHITECTURE.md         ← 架构决策、失败模式、成本、扩展路线
-    ├── TESTING.md              ← 测试说明：17 套逐条、核对清单、三个反向实验
+    ├── TESTING.md              ← 测试说明：20 套逐条、核对清单、三个反向实验
+    ├── ERROR_CODES.md          ← 错误码表（人读版）：25 码一码一段
+    └── ERROR_SYSTEM_DESIGN.md  ← 错误体系设计稿：取舍、落地回填、守门来历
     ├── RATE_LIMITING.md        ← 限流与额度：滑动窗口、Retry-After、热配置运维
     └── RUN_STATES.md           ← 运行状态与配色：五态含义、颜色驱动、改色规矩
 ```
@@ -515,9 +517,11 @@ $env:INSECURE_TLS="1"
 | [PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md) | 项目上下文：关键文件、运行部署、判定规则、已完成与待办 |
 | [docs/SOP.md](./docs/SOP.md) | 读解方法本体：七步流程、病灶库、实战档案 |
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | 架构决策与失败模式：每个决策后跟一句「不这么做会怎样」 |
-| [docs/TESTING.md](./docs/TESTING.md) | 测试说明：17 套测试逐条、核对清单、三个反向实验 |
+| [docs/TESTING.md](./docs/TESTING.md) | 测试说明：20 套测试逐条、核对清单、三个反向实验 |
 | [docs/RATE_LIMITING.md](./docs/RATE_LIMITING.md) | 限流与额度：滑动窗口、Retry-After、热配置 `dr:cfg:limit` 的运维手册 |
 | [docs/RUN_STATES.md](./docs/RUN_STATES.md) | 运行状态与配色：五个状态的含义、颜色由谁驱动、改色时的四条硬规矩 |
+| [docs/ERROR_CODES.md](./docs/ERROR_CODES.md) | 错误码表（人读版）：25 个码一码一段，用户看到 / 触发 / 何时加 / 排障 |
+| [docs/ERROR_SYSTEM_DESIGN.md](./docs/ERROR_SYSTEM_DESIGN.md) | 错误体系设计稿：为什么这么设计、落地时改了什么、八道守门的来历 |
 | [CHANGELOG.md](./CHANGELOG.md) | 变更记录，只记使用者能感觉到的改动 |
 
 ---

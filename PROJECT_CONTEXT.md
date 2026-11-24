@@ -31,13 +31,13 @@
 | `server/net.py` | **唯一出站口**：统一 CA、超时、两次重试、异常翻译 |
 | `server/doctor.py` | 环境体检：Python、certifi、代理变量、对上游的 TLS 握手 |
 | `server/llm.py` | OpenAI 兼容客户端 |
-| `server/test_*.py` | 17 套测试，见下文「测试」 |
+| `server/test_*.py` | 20 套测试，见下文「测试」 |
 | `tools/e2e_switch_check.py` | 端到端检查：起假模型 + 假页面 + 真服务，验「网址 / 上传音视频」切换后的报告头（A/B/C 三组 14 项断言） |
 | `web/index.html` | 单页前端（无外部依赖）：Markdown 渲染、窄屏表格转卡片、原文 / 可读版切换 |
 | `skills/article-deep-reading/` | 读解 SOP：`SKILL.md` + `references/checklists.md` + `scripts/`（`extract_wx.py` / `make_appendix.py` / `selfcheck_md.py`） |
 | `skills/math-doc-rigor/` | 数学文档严谨化：六查渲染体检 + 三层标注 + md→PDF 保真流水线 |
 | `docs/SOP.md` | 方法本体：七步流程、病灶库、实战档案、工程坑（340 行） |
-| `docs/TESTING.md` | 测试说明（给独立验证者）：17 套逐条、核对清单、三个反向实验、未覆盖边界 |
+| `docs/TESTING.md` | 测试说明（给独立验证者）：20 套逐条、核对清单、三个反向实验、未覆盖边界 |
 | `docs/ARCHITECTURE.md` | 架构决策与失败模式：每个决策后跟一句「不这么做会怎样」（244 行） |
 | `examples/` | 两份完整范例（SwarmEvolve、群作用与计数）：读解正文 + 算据附录 + 可独立跑的脚本 |
 | `CHANGELOG.md` | 只记影响使用者的改动；对外发布自 v2.3 起算 |
@@ -183,7 +183,7 @@ python3 server/doctor.py
 1. `python server/test_replay_v10.py --assert` —— 6 组历史误判回放，v1.0–v1.6 出过的错不许回来
 2. `python server/test_audit.py` —— 空表 / 假算 / 三态判定回归
 3. `python server/test_safe_eval.py` —— 求值器 35 项，绕过即阻断
-4. 推上去看 CI 全绿（17 套一次跑完）
+4. 推上去看 CI 全绿（20 套一次跑完）
 
 改抓取层（`extract.py` 的 `fetch()` 或其分支）后，**必须**跑 `python server/test_extract.py`：
 它是唯一真正调用 `fetch()` 的测试，v2.4 那个「忘 `import os` 导致三条抓取路一起崩」的 bug 就是靠它兜住的。
@@ -192,7 +192,7 @@ python3 server/doctor.py
 
 ## 测试
 
-CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳过；`test_media` 的分支层不依赖 ffmpeg，真实层才 skip）：
+CI 跑 20 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳过；`test_media` 的分支层不依赖 ffmpeg，真实层才 skip）：
 
 | 测试 | 覆盖 |
 |---|---|
@@ -414,8 +414,8 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 ### 24. 测试说明文档入库（v2.15）
 
 - **起因**：用户要把测试交给另一位验证者（TRAE）独立跑一遍，需要一份自包含的操作手册
-- **内容**：12 节 —— 环境要求、两种跑法（bash / PowerShell）、17 套逐条（项数 + 测什么 + 期望末行）、两个易误判点（skip 不等于失败、unittest 写 stderr）、逐条核对清单、三个反向实验、未覆盖边界、常见问题、迭代史、回报格式、端到端工具用法
-- **数字经实测校准**：367 个断言点（不是估算）、17 套、`test_pipeline_e2e` 20 项、`test_replay_v10` 16 条断言
+- **内容**：12 节 —— 环境要求、两种跑法（bash / PowerShell）、20 套逐条（项数 + 测什么 + 期望末行）、两个易误判点（skip 不等于失败、unittest 写 stderr）、逐条核对清单、三个反向实验、未覆盖边界、常见问题、迭代史、回报格式、端到端工具用法
+- **数字经实测校准**：367 个断言点（不是估算）、20 套、`test_pipeline_e2e` 20 项、`test_replay_v10` 16 条断言
 - **验证状态**：TRAE 验证通过后入库
 - **文件**：`docs/TESTING.md`、`README.md`
 
@@ -425,7 +425,7 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **实现**：`server/ratelimit.py` 两实现同接口、`allow()` 三态；`app.py` 加 `_client_ip()`（仅 peer 可信时采信 X-Real-IP，支持 CIDR）；429 与 503 分开
 - **三个取舍**：`TRUSTED_PROXIES` 空 = 不信任（宁可功能故障也不要静默漏洞）、三态而非布尔、故障后冷却 30 秒不再重试
 - **细节**：TTL 只在 `INCR` 返回 1 时设（每次 EXPIRE 会无限延后窗口）；`requirements` 加 redis 与 numpy
-- **测试**：新增 `test_ratelimit.py` 15 项；`test_app.py` 30 → 35 项；CI 16 → 17 套
+- **测试**：新增 `test_ratelimit.py` 15 项；`test_app.py` 30 → 35 项；CI 16 → 20 套
 - **文件**：`server/ratelimit.py`、`server/app.py`、`server/test_ratelimit.py`、`server/test_app.py`、`requirements.txt`、`.env.example`、`README.md`、`docs/ARCHITECTURE.md`（决策 7）
 
 ### 26. 报告分两层：简约版 / 详细版（v2.17）

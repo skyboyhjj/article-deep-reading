@@ -44,7 +44,7 @@
 - [ ] 改了限流 / 额度口径 → 跑 `test_ratelimit` 全套 + `docs/RATE_LIMITING.md` 与 429 文案、`/api/health` 三处口径一致
 - [ ] 改了数据留存（上传件生命周期、日志、脱敏）→ `README.md`「数据与隐私」与 `docs/RATE_LIMITING.md` 同步，并跑 `TestUploadTtl` / `TestUploadDrop`
 - [ ] 新增或改动了文档 → 过 `selfcheck_md.py` 与 `check_md.py`，退出码 0
-- [ ] 推 `main` 后看 CI：17 套全绿才算完
+- [ ] 推 `main` 后看 CI：20 套全绿才算完
 
 ---
 
@@ -95,7 +95,7 @@
 
 ## 五、CI/CD 与质量控制
 
-推 `main` 与 PR 触发 `.github/workflows/ci.yml`，17 套测试串跑，**全部不联网、不花钱**：
+推 `main` 与 PR 触发 `.github/workflows/ci.yml`，20 套测试串跑，**全部不联网、不花钱**：
 
 | 顺序 | 测试 | 覆盖 |
 |---|---|---|
