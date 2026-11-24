@@ -32,8 +32,8 @@
 | `server/doctor.py` | 环境体检：Python、certifi、代理变量、对上游的 TLS 握手 |
 | `server/llm.py` | OpenAI 兼容客户端 |
 | `server/test_*.py` | 17 套测试，见下文「测试」 |
-| `tools/e2e_switch_check.py` | 端到端检查：起假模型 + 假页面 + 真服务，验「网址 ↔ 上传音视频」切换后的报告头（A/B/C 三组 14 项断言） |
-| `web/index.html` | 单页前端（无外部依赖）：Markdown 渲染、窄屏表格转卡片、原文⇄可读版切换 |
+| `tools/e2e_switch_check.py` | 端到端检查：起假模型 + 假页面 + 真服务，验「网址 / 上传音视频」切换后的报告头（A/B/C 三组 14 项断言） |
+| `web/index.html` | 单页前端（无外部依赖）：Markdown 渲染、窄屏表格转卡片、原文 / 可读版切换 |
 | `skills/article-deep-reading/` | 读解 SOP：`SKILL.md` + `references/checklists.md` + `scripts/`（`extract_wx.py` / `make_appendix.py` / `selfcheck_md.py`） |
 | `skills/math-doc-rigor/` | 数学文档严谨化：六查渲染体检 + 三层标注 + md→PDF 保真流水线 |
 | `docs/SOP.md` | 方法本体：七步流程、病灶库、实战档案、工程坑（340 行） |
@@ -394,7 +394,7 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 
 ### 22. 修「URL 残留导致报告杂交」（v2.13）
 
-- **来源**：TRAE 按用户要求手动测两轮「URL ↔ 视频」切换，发现报告头被上次文章污染；我独立复现，两轮 `diff` 为空
+- **来源**：TRAE 按用户要求手动测两轮「URL / 视频」切换，发现报告头被上次文章污染；我独立复现，两轮 `diff` 为空
 - **根因**：前端 `run()` 同时提交 `url` 与 `upload_id`、`done` 不清 URL；后端 `if has_media and not url` 与 docstring 声明的优先级不一致
 - **修复三层**：`done` 清 URL（消除残留）、混合模式加「来源构成」行（让组合显式）、`KIND` 补 `video_upload` 映射（内部枚举名不外泄）
 - **不采纳**「上传时清空 URL」：会废掉「文章 + 视频对照」这条有意设计（视频号的「元宝总结 vs 原声」依赖它）
@@ -501,6 +501,8 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **M3 核验原语扩充**：给 `safe_eval` 加 `det2` / `trace` / `frobenius_norm` / `pow_sum` 等固定原语，模型只能填参数不能写代码（路线 A，不引沙箱）
 - **`PROOFREAD_PROMPT` 收紧**：要求 `why` 里必须给上下文证据；若「需要回听」普遍偏软，说明判据还要再硬
 - **同一篇缓存**：URL + 正文哈希为键、24h，重复请求近零成本（`docs/ARCHITECTURE.md` §五降本第一步）
+- **服务器部署 git 状态整理**：线上 `/opt/deepread/article-deep-reading` 的 HEAD 停在 `91c8ec3`（落后 `origin/main` 5 个提交），且服务器无法直连 GitHub（`git fetch` 报 GnuTLS 错误），历史部署靠 scp 直传文件到工作区、未走 git，工作区长期有未提交修改。待整理：让服务器 git 状态对齐 `origin/main`、补国内 pip 源加速构建、或打通服务器到 GitHub 的通道
+- **deepread 多副本**：线上当前仅 1 个应用副本（`docker compose ls` 的 `running(2)` 是「应用 + redis」两个容器，非双副本）。公开负载上来前评估是否扩为多副本（`TRUSTED_PROXIES` 与 Redis 限流已就位，见 `docs/RATE_LIMITING.md`）
 
 ## 新对话快速启动
 
