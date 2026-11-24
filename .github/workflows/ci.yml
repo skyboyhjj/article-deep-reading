@@ -32,6 +32,11 @@ jobs:
       - name: 限流器（三态 / fail closed / 熔断）
         run: python server/test_ratelimit.py
 
+      # ── 错误码表：编号连续 / 异常持码一致 / 占位符与调用点双向一致 / 展示口径 ──
+      # 这一段曾漏接 CI（v2.28 加了文件却没加步骤），等于守门没上岗
+      - name: 错误码表（25 码 / 占位符 / 展示口径）
+        run: python server/test_codes.py
+
       # ── HTTP 层：真起服务、打真请求；analyze 用假 pipeline，不花钱 ──
       - name: HTTP 层（路由 / 校验 / 限流 / SSE 收尾）
         run: python server/test_app.py
@@ -40,8 +45,8 @@ jobs:
       - name: 输入切换端到端
         run: python tools/e2e_switch_check.py --rounds 2
 
-      # ── 前后端契约：服务端发的 stage/status，前端必须都认识 ──
-      - name: 前后端契约（标签集合 / 结束态 / done.md）
+      # ── 前后端契约：stage/status 认不认，错误展示字段用不用 ──
+      - name: 前后端契约（阶段标签 / 错误展示 / 配色对比度）
         run: python server/test_ui_contract.py
 
       # ── 抓取层：patch 掉网络、真调 fetch()，覆盖 FETCH_BACKEND 三档与未设置 ──

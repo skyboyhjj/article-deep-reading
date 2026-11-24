@@ -18,6 +18,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import codes
+
 HERE = Path(__file__).resolve().parent
 INDEX = HERE.parent / "web" / "index.html"
 PIPELINE = HERE / "pipeline.py"
@@ -291,6 +293,108 @@ class TestHomeTheme(unittest.TestCase):
         self.assertIn("animation", m.group(1), "运行态没有动效，与完成态几乎同色")
         self.assertRegex(self.html, r"@keyframes\s+stpulse")
         self.assertIn("prefers-reduced-motion", self.html, "动效缺少减少动态的降级")
+
+
+def css_var(html: str, name: str) -> str | None:
+    m = re.search(r"--" + re.escape(name) + r"\s*:\s*(#[0-9a-fA-F]{3,6})", html)
+    return m.group(1) if m else None
+
+
+def css_rule(html: str, selector: str) -> dict:
+    """取选择器的 color 与 background，支持 var(--x)。"""
+    m = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", html)
+    if not m:
+        return {}
+    out = {}
+    for prop in ("color", "background"):
+        mm = re.search(r"(?<![-\w])" + prop
+                       + r"\s*:\s*(#[0-9a-fA-F]{3,6}|var\(--[\w-]+\))", m.group(1))
+        if not mm:
+            continue
+        v = mm.group(1)
+        if v.startswith("var("):
+            v = css_var(html, v[6:-1])
+        if v:
+            out[prop] = v
+    return out
+
+
+class TestErrorPresentation(unittest.TestCase):
+    """P1：错误提示按责任分色、码与诊断信息能一键复制（设计 v2.1 第八节）。
+
+    守的不是「样式好不好看」，而是三件会静默坏掉的事：
+
+      ① 前端又自己算了一遍分档 —— 与码表漂开，只有浏览器里才看得出；
+      ② 某条错误漏走统一出口 —— 还在往 #err 塞纯文本，码与诊断全丢；
+      ③ 前端写了码表里没有的码 —— 动作按钮点了没反应，诊断也对不上日志。
+    """
+
+    def setUp(self):
+        self.html = INDEX.read_text(encoding="utf-8")
+        m = re.search(r"<script>(.*)</script>", self.html, re.S)
+        self.assertTrue(m, "找不到内联脚本")
+        self.js = m.group(1)
+
+    def test_frontend_uses_server_side_presentation(self):
+        """红/黄、摆不摆码、摆不摆诊断，都由服务端 codes.present() 定。"""
+        for field in ("E.level", "E.show_code", "E.show_diag"):
+            self.assertIn(field, self.js,
+                          f"前端没有用服务端给的 {field}，等于又把分档算了一遍")
+
+    def test_only_two_levels(self):
+        self.assertIn(".err.fail .body", self.html)
+        self.assertIn(".err.warn .body", self.html)
+
+    def test_no_direct_err_writes(self):
+        """所有错误都必须经 showErr —— 直接塞 textContent 会把码和诊断一起丢掉。"""
+        self.assertEqual(self.js.count('$("err").textContent'), 0,
+                         "还有地方直接往 #err 写文本，绕过了 showErr")
+
+    def test_error_action_codes_exist(self):
+        m = re.search(r"const ERR_ACTION = \{(.*?)\n\};", self.js, re.S)
+        self.assertTrue(m, "找不到 ERR_ACTION 表")
+        used = set(re.findall(r'"(DR-\d{4})"', m.group(1)))
+        self.assertTrue(used, "ERR_ACTION 是空的")
+        self.assertEqual(used - set(codes.CODES), set(), "动作按钮绑了码表里没有的码")
+
+    def test_every_code_in_html_exists(self):
+        """前端出现的每个 DR-xxxx 都得在码表里，否则那一支永远走不到对的文案。"""
+        used = set(re.findall(r"DR-\d{4}", self.html))
+        self.assertTrue(used)
+        self.assertEqual(used - set(codes.CODES), set())
+
+    def test_diag_has_five_lines(self):
+        """诊断信息五行：版本与时间、码与 condition、阶段与追踪号、状态与耗时、UA。"""
+        m = re.search(r"function buildDiag\(E\)\{(.*?)\n\}", self.js, re.S)
+        self.assertTrue(m, "找不到 buildDiag")
+        body = m.group(1)
+        for key in ("DeepRead", "code:", "stage:", "status:", "ua:"):
+            self.assertIn(key, body, f"诊断信息缺 {key} 这一段")
+
+    def test_copy_works_without_clipboard_api(self):
+        """局域网 IP 直连（http，非 localhost）没有 navigator.clipboard，必须留退路。"""
+        self.assertIn("navigator.clipboard", self.js)
+        self.assertIn("execCommand", self.js)
+
+    def test_countdown_is_cleared(self):
+        m = re.search(r"function clearErr\(\)\{(.*?)\n\}", self.js, re.S)
+        self.assertTrue(m, "找不到 clearErr")
+        self.assertIn("clearInterval", m.group(1), "清错误时没停倒计时，会留下一个跑着的 timer")
+
+    def test_error_paths_all_go_through_showerr(self):
+        """上传失败 / 请求失败 / 流中失败 / 前端自判 / 网络错误 / 健康检查，都要展示。"""
+        self.assertGreaterEqual(self.js.count("showErr("), 7,
+                                "showErr 的调用点太少，有错误路径还在自己拼文案")
+
+    def test_err_colors_meet_wcag(self):
+        for sel in (".err.fail .body", ".err.warn .body"):
+            r = css_rule(self.html, sel)
+            self.assertIn("color", r, f"{sel} 取不到文字色")
+            self.assertIn("background", r, f"{sel} 取不到底色")
+            ratio = contrast_ratio(r["color"], r["background"])
+            self.assertGreaterEqual(
+                ratio, 4.5,
+                f"{sel} 对比度 {ratio} < 4.5（{r['color']} on {r['background']}）")
 
 
 if __name__ == "__main__":

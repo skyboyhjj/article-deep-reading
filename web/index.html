@@ -151,7 +151,31 @@
     padding:18px;max-height:60vh;overflow:auto;margin:0;
     font-family:"SFMono-Regular",Consolas,"Noto Sans Mono CJK SC",monospace;
   }
-  .err{color:var(--fail);font-size:14px;margin-top:16px}
+  /* ---------- 错误提示：按责任分色 ----------
+     user+不可重试 → 红，只说人话不给码；user+可重试（限流/并发）→ 黄，带倒计时；
+     third（外部依赖）→ 黄，给换法 + 码 + 诊断；us（我们的锅）→ 红，码 + 诊断一键复制。 */
+  .err{margin-top:16px;font-size:14px;display:none}
+  .err.on{display:block}
+  .err .body{padding:12px 15px;border-radius:10px;border:1px solid;line-height:1.65;text-align:left}
+  .err.fail .body{border-color:#e0b6b6;background:#fbeeee;color:var(--fail)}
+  .err.warn .body{border-color:#e2cfa6;background:#fdf6e9;color:#8a5a0c}
+  .err .msg{font-weight:600}
+  .err .hi{font-size:13px;margin-top:5px;opacity:.92}
+  .err .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:9px;font-size:12.5px}
+  .err .code{font-family:"SFMono-Regular",Consolas,monospace;letter-spacing:.4px;opacity:.72}
+  .err .count{font-variant-numeric:tabular-nums;opacity:.9}
+  .err button.act{
+    padding:5px 11px;font-size:12.5px;border-radius:7px;cursor:pointer;
+    border:1px solid currentColor;background:transparent;color:inherit;font-family:inherit;
+  }
+  .err button.act:hover{background:rgba(0,0,0,.05)}
+  .err details.diag{margin-top:9px;font-size:12px}
+  .err details.diag summary{cursor:pointer;opacity:.8}
+  .err pre.diagbox{
+    margin:8px 0 0;padding:10px 12px;border-radius:7px;background:#fff;
+    border:1px solid var(--line);color:#40544c;white-space:pre-wrap;word-break:break-all;
+    font-family:"SFMono-Regular",Consolas,"Noto Sans Mono CJK SC",monospace;font-size:12px;
+  }
   .actions{margin-top:14px;display:flex;gap:14px;flex-wrap:wrap;align-items:center}
   .actions a{font-size:13.5px;color:var(--accent)}
   .hint{color:var(--muted);font-size:12.5px}
@@ -320,7 +344,7 @@
     数据怎么来、怎么删，以及慧惠的数据铁律，都写在
     <a href="https://hui-skill.org/ethics#data-rules" target="_blank" rel="noopener">《慧惠的 AI 伦理》</a> 里。<br>
     <a href="https://hui-skill.org/" target="_blank" rel="noopener">反馈与建议</a><br>
-    最后更新：2026-11-20
+    最后更新：2026-11-24
   </footer>
 </div>
 
@@ -328,6 +352,183 @@
 const $ = (id) => document.getElementById(id);
 const LABEL = {extract:"抓取", transcribe:"转写", triage:"定性", verify:"核验", trace:"溯源", compute:"实算", render:"成稿"};
 let busy = false;
+let errTimer = null;      // 限流倒计时的 interval
+let lastDiag = "";        // 当前这条错误的诊断文本（复制按钮用）
+let runStart = 0;         // 本次读解开始时间（诊断信息里的 elapsed）
+let curStage = "";        // 流程走到哪个阶段（诊断信息里的 stage）
+let quotaVersion = "";    // 服务端版本：SSE 首帧给，不必另发请求
+let lastRid = "";         // 兜底追踪号：非错误帧里也可能收到
+
+/* ================= 错误展示 =================
+   一条错误长什么样，由服务端给的 responsibility 决定，不由码段决定：
+   码是给报障与日志用的，用户只关心「我该改什么、这是谁的锅」。
+   所有字段都来自服务端码表（唯一事实源），前端不抄一份会漂的映射。
+
+   四档（设计 v2.1 第八节）：
+   user + 不可重试 → 红，只给人话与改法，不显示码
+   user + 可重试   → 黄，倒计时，码放末尾小字
+   third           → 黄，换法的建议 + 码 + 诊断信息
+   us              → 红，码 + 诊断信息（默认展开，一键复制） */
+
+const ERR_ACTION = {
+  "DR-1005": {label:"改用链接或音视频", run: () => $("url").focus()},
+  "DR-2002": {label:"改用粘贴正文",   run: () => $("url").focus()},
+  "DR-2003": {label:"换一个文件",     run: () => $("file").click()},
+  "DR-2005": {label:"重新上传",       run: () => $("file").click()},
+  "DR-4003": {label:"改用粘贴正文",   run: () => $("url").focus()},
+  "DR-4004": {label:"换一个文件",     run: () => $("file").click()},
+};
+
+function clearErr(){
+  const box = $("err");
+  box.className = "err";
+  box.innerHTML = "";
+  if(errTimer){ clearInterval(errTimer); errTimer = null; }
+  lastDiag = "";
+}
+
+function uaShort(){
+  const u = navigator.userAgent || "";
+  const m = u.match(/(Edg|Chrome|Firefox|Version)\/(\d+)/);
+  const name = m ? ((m[1] === "Version" ? "Safari" : m[1]) + "/" + m[2]) : "未知";
+  const os = /Windows/.test(u) ? "Windows"
+           : /Mac OS X/.test(u) ? "macOS"
+           : /Android/.test(u) ? "Android"
+           : /iPhone|iPad/.test(u) ? "iOS" : "其它";
+  return name + " (" + os + ")";
+}
+
+function nowIso(){
+  const d = new Date(), p = n => String(n).padStart(2, "0");
+  const off = -d.getTimezoneOffset();
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T"
+       + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds())
+       + (off >= 0 ? "+" : "-") + p(Math.floor(Math.abs(off) / 60)) + ":" + p(Math.abs(off) % 60);
+}
+
+/* 诊断信息：用户不必懂它，但它能让「一条报障」直接对上「一行日志」。
+   stage 一行是 DeepRead 比通用错误提示多出来的东西——纯前端不知道流程走到哪。 */
+function buildDiag(E){
+  const elapsed = runStart ? ((Date.now() - runStart) / 1000).toFixed(1) + "s" : "-";
+  return [
+    "DeepRead v" + (quotaVersion || "?") + " · " + nowIso(),
+    "code: " + (E.code || "-") + " · condition: " + (E.condition || "-"),
+    "stage: " + (E.stage || curStage || "-") + " · request_id: " + (E.request_id || lastRid || "-"),
+    // 流中错误的 HTTP 恒为 200（错误落在 SSE 帧里），所以这里默认 200 而不是「未知」
+    "status: " + (E.http != null ? E.http : 200) + " · elapsed: " + elapsed,
+    "ua: " + uaShort(),
+  ].join("\n");
+}
+
+async function copyText(t){
+  try{
+    // https 与 localhost 之外（比如局域网 IP 直连）没有 clipboard API，退回 execCommand
+    if(navigator.clipboard && window.isSecureContext){
+      await navigator.clipboard.writeText(t);
+      return true;
+    }
+  }catch(e){}
+  try{
+    const ta = document.createElement("textarea");
+    ta.value = t;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  }catch(e){ return false; }
+}
+
+function fmtClock(sec){
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m + ":" + String(s).padStart(2, "0");
+}
+
+function el(tag, cls, txt){
+  const e = document.createElement(tag);
+  if(cls) e.className = cls;
+  if(txt != null) e.textContent = txt;
+  return e;
+}
+
+function showErr(E){
+  clearErr();
+  // 红还是黄、要不要摆码与诊断，服务端已经算好了（codes.present）——这里只负责画。
+  // 三个展示字段缺失时（老响应、前端自造的错误）就地按同一口径兜一下。
+  const resp = E.responsibility || "third";
+  const retryable = !!E.retryable;
+  const isUser = resp === "user";
+  const guessLevel = ((!isUser || retryable) && resp !== "us") ? "warn" : "fail";
+  const level = (E.level === "fail" || E.level === "warn") ? E.level : guessLevel;
+  const showCode = (E.show_code != null ? E.show_code : !(isUser && !retryable)) && !!E.code;
+  const showDiag = (E.show_diag != null ? E.show_diag : !isUser) && !!E.code;
+  const canRetry = retryable && E.retry_in_seconds > 0;
+
+  const body = el("div", "body");
+  body.appendChild(el("div", "msg", E.error || E.text || "出错了"));
+  // 有倒计时就不再重复 hint —— 「约 2 分钟后恢复」与倒计时说的是同一件事
+  if(E.hint && E.hint !== E.error && !canRetry) body.appendChild(el("div", "hi", E.hint));
+
+  const row = el("div", "row");
+
+  if(canRetry){
+    const c = el("span", "count");
+    row.appendChild(c);
+    let left = Math.ceil(E.retry_in_seconds);
+    const tick = () => {
+      if(left <= 0){
+        c.textContent = "可以再试了";
+        if(errTimer){ clearInterval(errTimer); errTimer = null; }
+        return;
+      }
+      c.textContent = left < 60
+        ? "约 " + left + " 秒后可再试"
+        : "约 " + Math.ceil(left / 60) + " 分钟后恢复（" + fmtClock(left) + "）";
+      left--;
+    };
+    tick();
+    errTimer = setInterval(tick, 1000);
+  }
+
+  const action = ERR_ACTION[E.code];
+  if(action){
+    const b = el("button", "act", action.label);
+    b.type = "button";
+    b.addEventListener("click", action.run);
+    row.appendChild(b);
+  }
+
+  if(showCode && E.code) row.appendChild(el("span", "code", E.code));
+
+  if(showDiag){
+    const diag = buildDiag(E);
+    lastDiag = diag;
+    const cp = el("button", "act", "复制诊断信息");
+    cp.type = "button";
+    cp.addEventListener("click", async () => {
+      const ok = await copyText(diag);
+      cp.textContent = ok ? "已复制" : "复制失败，请手动选中";
+      setTimeout(() => { cp.textContent = "复制诊断信息"; }, 1800);
+    });
+    row.appendChild(cp);
+
+    const d = el("details", "diag");
+    if(resp === "us") d.open = true;              // 我们的锅：把诊断摆在明面上
+    d.appendChild(el("summary", null, "诊断信息（报障时请连同它一起发）"));
+    d.appendChild(el("pre", "diagbox", diag));
+    body.appendChild(row);
+    body.appendChild(d);
+  }else if(row.childNodes.length){
+    body.appendChild(row);
+  }
+
+  const wrap = $("err");
+  wrap.className = "err on " + level;
+  wrap.appendChild(body);
+  try{ wrap.scrollIntoView({block:"nearest", behavior:"smooth"}); }catch(e){}
+}
 
 function setStage(s, cls){
   const el = document.querySelector('.st[data-s="' + s + '"]');
@@ -341,7 +542,8 @@ function resetStages(){
   $("stages").style.display = "flex";
   document.querySelectorAll(".st").forEach(el => { el.className = "st"; });
   $("log").textContent = "";
-  $("err").textContent = "";
+  clearErr();
+  curStage = "";
   $("summary").innerHTML = "";
   $("reportCard").style.display = "none";
 }
@@ -498,12 +700,6 @@ function fmtDur(sec){
   return Math.floor(t / 60) + "分" + String(t % 60).padStart(2, "0") + "秒";
 }
 
-function fmtWait(sec){
-  const s = Math.ceil(sec || 0);
-  if(s <= 0) return "";
-  return s < 60 ? ("约 " + s + " 秒后恢复") : ("约 " + Math.ceil(s / 60) + " 分钟后恢复");
-}
-
 function uploadFile(f){
   const xhr = new XMLHttpRequest();
   xhr.open("POST", "/api/upload");
@@ -530,13 +726,19 @@ function uploadFile(f){
       $("fname").textContent = "已上传：" + r.name + "（" + mb + " MB" + dur + "）— 将走原声转录";
     }else{
       $("fprog").textContent = "";
-      $("err").textContent = "上传失败：" + (r.error || ("HTTP " + xhr.status)) + (r.retry_in_seconds ? "（" + fmtWait(r.retry_in_seconds) + "）" : "");
+      if(r && r.code){
+        showErr(Object.assign({stage:"upload", http:xhr.status}, r));
+      }else{
+        showErr({stage:"upload", http:xhr.status, responsibility:"third", retryable:true,
+                 error:"上传失败（HTTP " + xhr.status + "）", hint:"稍后重试；持续失败请发诊断信息"});
+      }
     }
   };
   xhr.onerror = () => {
     $("fileLabel").classList.remove("busy");
     $("fprog").textContent = "";
-    $("err").textContent = "上传失败：网络错误";
+    showErr({stage:"upload", responsibility:"third", retryable:true,
+             error:"上传中断", hint:"检查网络后重新选择文件"});
   };
   xhr.send(f);
 }
@@ -569,13 +771,18 @@ async function run(){
   }
 
   if(d.mode === "none"){
-    $("err").textContent = d.typed
-      ? "正文不足 200 字，也没找到链接（链接需以 http:// 或 https:// 开头）"
-      : "请给链接、粘贴正文，或上传音视频";
+    // 前端自己就能判的错，同样走统一展示：文案与服务端码表对齐，用户看到的是同一种东西
+    showErr(d.typed
+      ? {code:"DR-1005", condition:"textTooShort", responsibility:"user", retryable:false,
+         error:"正文不足 200 字，也没找到链接",
+         hint:"链接需以 http:// 或 https:// 开头，或直接粘贴完整正文"}
+      : {code:"DR-1004", condition:"noInput", responsibility:"user", retryable:false,
+         error:"请给链接、粘贴正文，或上传音视频"});
     return;
   }
 
   busy = true; $("go").disabled = true; resetStages();
+  runStart = Date.now();
 
   try{
     const resp = await fetch("/api/analyze", {
@@ -585,13 +792,17 @@ async function run(){
     });
     if(!resp.ok || !resp.body){
       const t = await resp.text();
-      let msg = t, wait = "";
-      try{
-        const j = JSON.parse(t);
-        msg = j.error || t;
-        if(j.retry_in_seconds) wait = "（" + fmtWait(j.retry_in_seconds) + "）";
-      }catch(e){}
-      $("err").textContent = "请求失败：" + msg + wait;
+      let j = null;
+      try{ j = JSON.parse(t); }catch(e){}
+      if(j && j.code){
+        // 流前错误：HTTP 4xx/5xx + 结构化体，直接按码表字段展示
+        showErr(Object.assign({stage:"pre", http:resp.status}, j));
+      }else{
+        // 非 JSON（反代或网关直接吐的 5xx 页面）：不把一坨 HTML 糊到用户脸上
+        showErr({stage:"pre", http:resp.status, responsibility:"third", retryable:true,
+                 error:"请求失败（HTTP " + resp.status + "）",
+                 hint:"稍后重试；持续失败请把这条诊断信息发给我们"});
+      }
       return;
     }
 
@@ -611,7 +822,9 @@ async function run(){
       }
     }
   }catch(e){
-    $("err").textContent = "网络错误：" + e.message;
+    showErr({stage:curStage || "pre", responsibility:"third", retryable:true,
+             error:"网络错误",
+             hint:"检查网络后重试（" + (e && e.message ? e.message : "连接中断") + "）"});
   }finally{
     busy = false; $("go").disabled = false;
   }
@@ -624,15 +837,23 @@ function handleEvent(chunk){
   try{ ev = JSON.parse(lines.map(l => l.slice(5).trim()).join("")); }catch(e){ return; }
 
   const stage = ev.stage, status = ev.status, text = ev.text, data = ev.data;
-  if(text) $("log").textContent = text;
+  // fail 帧的 text 已被服务端改写成「人话 + 改法」，交给错误框展示，不再写进日志行
+  if(text && status !== "fail") $("log").textContent = text;
 
-  if(stage === "quota" || stage === "error") return;
+  if(stage === "quota"){
+    // 首帧带版本与追踪号：拼诊断信息不必另发请求
+    if(ev.version) quotaVersion = ev.version;
+    if(ev.request_id) lastRid = ev.request_id;
+    return;
+  }
+  if(ev.request_id) lastRid = ev.request_id;
 
-  if(status === "run"){ setStage(stage, "run"); return; }
-  if(status === "ok" || status === "warn") setStage(stage, status);
+  if(status === "run"){ curStage = stage; setStage(stage, "run"); return; }
+  if(status === "ok" || status === "warn"){ curStage = stage; setStage(stage, status); }
   if(status === "fail"){
-    setStage(stage, "fail");
-    $("err").textContent = text || "失败";
+    // 兜底帧的 stage 是 "error"，不在阶段条里；它恰恰最该被看见，不能吞掉
+    if(stage !== "error") setStage(stage, "fail");
+    showErr(Object.assign({stage: stage === "error" ? curStage : stage}, ev));
     return;
   }
 
@@ -721,8 +942,11 @@ $("dropBtn").addEventListener("click", async () => {
 });
 
 fetch("/api/health").then(r => r.json()).then(h => {
+  if(h.version) quotaVersion = h.version;   // 页面一打开就有版本号，诊断信息更完整
   if(!h.llm){
-    $("err").textContent = "服务端尚未配置 LLM_API_KEY，只能抓取不能读解。";
+    // 能力缺失不是用户做错了什么：黄色轻提示，不摆码、也不给诊断
+    showErr({stage:"pre", responsibility:"third", retryable:false,
+             error:"服务端尚未配置模型", hint:"只能抓取，不能读解。请联系站点维护者。"});
   }
   if(!h.asr){
     $("fname").textContent = "服务端未配置 ASR：上传的音视频无法转写。";

@@ -82,7 +82,7 @@ CODES: Final[dict[str, Code]] = {
     "DR-4002": _c("DR-4002", "modelFailed", "in", 200,
                   "模型调用失败", "稍后重试（已自动重试 2 次）", True, "third", True),
     "DR-4003": _c("DR-4003", "fetchFailed", "in", 200,
-                  "这个链接抓不到内容", "改用粘贴正文", False, "third", True),
+                  "这个链接抓不到内容", "改用「粘贴正文」，或上传音视频", False, "third", True),
     "DR-4004": _c("DR-4004", "transcribeFailed", "in", 200,
                   "音视频转写失败", "换一个文件，或粘贴正文", True, "third", True),
     "DR-4005": _c("DR-4005", "mediaFailed", "in", 200,
@@ -113,16 +113,47 @@ def get(key: str) -> Code:
         raise KeyError(f"未登记的错误码：{key}（可用：{len(CODES)} 个）") from None
 
 
-def payload(key: str, **fmt) -> dict:
-    """构造返回体（不含 ok 与 request_id —— 这两样由调用方补，因为它知道请求上下文）。"""
-    c = get(key)
+def present(c: Code) -> dict:
+    """这条错误该怎么展示（设计 v2.1 第八节：由责任驱动，不由号段驱动）。
+
+    **为什么放服务端算**：若前端自己按 responsibility + retryable 推一遍，
+    25 个码的分档就活在前端一份隐式逻辑里——改一个码的展示口径要动两处，
+    而且只能在浏览器里看出来。放这儿，Python 就能穷举 25 个码断言它。
+
+    三档口径：
+      user + 不可重试 → 红、不摆码（改一下就行，面前摆个 DR-1005 只会添乱）
+      user + 可重试   → 黄、码放末尾小字
+      third / us      → 黄 / 红，都摆码；third 是「换法 + 诊断」，us 是「诊断 + 复制」
+    """
+    is_user = c.responsibility == "user"
     return {
+        "level": "fail" if (c.responsibility == "us" or (is_user and not c.retryable)) else "warn",
+        "show_code": not (is_user and not c.retryable),
+        "show_diag": not is_user,
+    }
+
+
+def payload(key: str, **fmt) -> dict:
+    """构造返回体（不含 ok 与 request_id —— 这两样由调用方补，因为它知道请求上下文）。
+
+    `responsibility` 与 `present()` 出的三个展示字段一起给前端：前端不该认识码，
+    只该知道「这是谁的锅、红还是黄、要不要摆码和诊断」。把这层判断留在码表里，
+    前端就不会抄出一份会漂的映射。
+
+    文案一律走 `format(**fmt)`：模板里有占位符而调用方没传，就在开发期炸
+    （KeyError），而不是把一句带 `{minutes}` 的原文发给用户。
+    """
+    c = get(key)
+    out = {
         "code": c.key,
         "condition": c.condition,
-        "error": c.message.format(**fmt) if fmt else c.message,
-        "hint": c.hint.format(**fmt) if fmt else c.hint,
+        "error": c.message.format(**fmt),
+        "hint": c.hint.format(**fmt),
         "retryable": c.retryable,
+        "responsibility": c.responsibility,
     }
+    out.update(present(c))
+    return out
 
 
 def keys_by_scope(scope: StageScope) -> list[str]:

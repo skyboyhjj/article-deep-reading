@@ -163,6 +163,11 @@ class TestErrorShape(Base):
         self.assertIsNone(obj["retry_in_seconds"])
         self.assertTrue(obj["error"])
         self.assertTrue(obj["hint"])
+        self.assertEqual(obj["responsibility"], "user")
+        # 展示口径由服务端定：输入类不摆码、不摆诊断（前端照着画就行）
+        self.assertEqual(obj["level"], "fail")
+        self.assertFalse(obj["show_code"])
+        self.assertFalse(obj["show_diag"])
         self.assertRegex(obj["request_id"], r"^[0-9a-f]{8}$")
         self.assertEqual(obj["request_id"], headers.get("X-Request-Id"))
 
@@ -176,6 +181,23 @@ class TestErrorShape(Base):
         status, _, body = request("GET", "/api/nothing")
         self.assertEqual(status, 404)
         self.assertEqual(json.loads(body)["code"], "DR-1007")
+
+    def test_error_body_has_responsibility(self):
+        """前端分色靠 responsibility——三档都得能出得去，前端不必自己抄码表。"""
+        status, _, body = post_json("/api/analyze", {"text": "短"})
+        self.assertEqual(status, 400)
+        self.assertEqual(json.loads(body)["responsibility"], "user")
+
+    def test_server_side_error_says_us(self):
+        # 页面文件缺失 → 我们的锅。前端据此把码与诊断信息摆到显眼处。
+        with mock.patch.object(app, "WEB", Path("/nonexistent-web")):
+            status, _, body = request("GET", "/")
+        self.assertEqual(status, 500)
+        obj = json.loads(body)
+        self.assertEqual(obj["code"], "DR-5001")
+        self.assertEqual(obj["responsibility"], "us")
+        self.assertEqual(obj["level"], "fail")       # 我们的锅：红
+        self.assertTrue(obj["show_diag"])            # 且必须给诊断信息
 
 
 class TestGet(Base):
@@ -224,7 +246,7 @@ class TestGet(Base):
             os.environ.pop("LLM_API_KEY", None)
         self.assertEqual(status, 200)
         data = json.loads(body)
-        for key in ("ok", "llm", "asr", "asr_backend", "search", "search_backend",
+        for key in ("ok", "version", "llm", "asr", "asr_backend", "search", "search_backend",
                     "ffmpeg", "max_upload_mb", "rate_limit_per_hour", "max_concurrent"):
             self.assertIn(key, data)
         self.assertNotIn(b"sk-should-never-appear", body)
@@ -350,6 +372,31 @@ class TestAnalyzeStream(Base):
         self.assertIn('"stage": "fetch"', text)
         self.assertIn('"stage": "done"', text)
         self.assertTrue(text.endswith("\n\n"))           # 收尾干净
+        # 首帧带版本与追踪号：前端不必另发请求就能拼出诊断信息（设计 §4.2）
+        quota = json.loads(text.split("\n\n")[0][5:].strip())
+        self.assertEqual(quota["stage"], "quota")
+        self.assertEqual(quota["version"], app.APP_VERSION)
+        self.assertRegex(quota["request_id"], r"^[0-9a-f]{8}$")
+
+    def test_stream_fail_frame_is_enriched(self):
+        """流中 fail 帧补齐码表字段；帧里的内部异常摘要不许上页面。"""
+        ev = {"stage": "triage", "status": "fail", "code": "DR-4002",
+              "text": "模型调用失败：ConnectionError: secret-internal-host"}
+        with mock.patch.object(app.pipeline, "analyze", self._fake(ev)):
+            status, _, body = post_json("/api/analyze", {"url": "https://example.com/e"})
+        self.assertEqual(status, 200)
+        frames = [json.loads(c[5:].strip()) for c in body.decode().split("\n\n")
+                  if c.startswith("data:")]
+        fail = [f for f in frames if f.get("status") == "fail"][0]
+        self.assertEqual(fail["code"], "DR-4002")
+        self.assertEqual(fail["responsibility"], "third")
+        self.assertEqual(fail["level"], "warn")        # 外部依赖：黄
+        self.assertTrue(fail["show_diag"])
+        self.assertEqual(fail["condition"], "modelFailed")
+        self.assertTrue(fail["retryable"])
+        self.assertTrue(fail["hint"])
+        self.assertRegex(fail["request_id"], r"^[0-9a-f]{8}$")
+        self.assertNotIn("secret-internal-host", fail["text"])
 
     def test_pipeline_exception_becomes_error_event(self):
         def boom(*a, **k):

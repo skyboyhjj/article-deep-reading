@@ -8,9 +8,9 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.29**（2026-11-24）
+- 当前版本：**v2.30**（2026-11-24）
 
-核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、17 套 CI 测试。
+核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、18 套 CI 测试。
 
 `skills/` 与 `server/` 是**同一套方法的两副形态**：前者给平台内的助手用（纯提示词 + 脚本），后者给人用（能跑的服务）。
 
@@ -513,6 +513,16 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **补测（评审反馈触发）**：`test_codes` 第六节用 AST 静态扫 `_fail("DR-xxxx", …)` 的实参，与码表模板占位符双向比对——缺 key 会 `KeyError`、多传 key 被 `str.format` 静默忽略，两种都报。反向验证：删 `minutes=` 实参该项立即变红
 - **DR-3001 的分钟口径**：hint 写「约 `{minutes}` 分钟后恢复」，body 给 `retry_in_seconds`，两者必须同由 `sec` 派生（`minutes=max(1, round(sec / 60))`），不许各算一套
 - **文件**：`server/app.py`、`server/pipeline.py`、`server/test_app.py`、`server/test_codes.py`、`CHANGELOG.md`
+
+### 36. 错误体系 P1：提示分色与诊断复制（v2.30）
+
+- **做了什么**：错误体加 `responsibility` 与 `level` / `show_code` / `show_diag` 四个字段；`#err` 四形态（按责任分色）；诊断信息一键复制（五项）；限流真倒计时；按码挂动作按钮
+- **关键判断**：分档放服务端 `codes.present()`，不放前端。前端自己算的话，25 个码的展示口径就活在浏览器里，只能用眼睛验；放后端就能被 Python 穷举断言（`test_codes` 第七节）
+- **顺手修掉的吞错**：前端 `handleEvent` 里 `stage === "error"` 直接 return —— 服务端兜底错误帧从来没显示过。现在 `error` 帧走正常 fail 分支
+- **流中帧与流前 JSON 同源**：都走 `codes.payload()`，字段一字不差；帧里 `text` 改写为「人话 + 改法」，pipeline 兜底帧的 `内部错误：KeyError: xxx` 不再上页面
+- **踩到的坑**：v2.28 加了 `test_codes.py` 却没往 workflow 里加步骤，守门一直没上岗（v2.30 补上，`18 套 CI` 由此而来）
+- **测试**：`test_app` 73、`test_codes` 61、`test_ui_contract` 33
+- **文件**：`server/codes.py`、`server/app.py`、`server/test_app.py`、`server/test_codes.py`、`server/test_ui_contract.py`、`web/index.html`、`.github/workflows/ci.yml`
 
 ## 待办
 

@@ -76,11 +76,17 @@ print("=" * 70)
 print("二、payload 与查询")
 print("=" * 70)
 p = codes.payload("DR-1005")
-chk("payload 五个字段齐全",
-    set(p) == {"code", "condition", "error", "hint", "retryable"}, str(sorted(p)))
+chk("payload 九个字段齐全",
+    set(p) == {"code", "condition", "error", "hint", "retryable", "responsibility",
+               "level", "show_code", "show_diag"}, str(sorted(p)))
 chk("payload 文案取自码表", p["error"] == "正文太短（不足 200 字）", p["error"])
 chk("payload 带出 condition", p["condition"] == "textTooShort")
 chk("payload 不塞 ok / request_id（由调用方补）", "ok" not in p and "request_id" not in p)
+chk("responsibility 出到线上（前端据此分色，不必自己抄映射）",
+    (codes.payload("DR-1005")["responsibility"], codes.payload("DR-4002")["responsibility"],
+     codes.payload("DR-5003")["responsibility"]) == ("user", "third", "us"))
+chk("responsibility 三档都非空",
+    all(c.responsibility in ("user", "third", "us") for c in codes.CODES.values()))
 
 chk("占位符替换（文件上限）", codes.payload("DR-2002", limit=300)["error"].endswith("300 MB"),
     codes.payload("DR-2002", limit=300)["error"])
@@ -221,6 +227,44 @@ chk("调用点不多传无用实参", not extra_key, "; ".join(extra_key))
 q = codes.payload("DR-3001", limit=20, minutes=12)
 chk("DR-3001 分钟与秒同源（hint 说分钟，body 给秒）",
     "12" in q["hint"] and q["code"] == "DR-3001", q["hint"])
+
+print()
+print("=" * 70)
+print("七、展示口径：四档由责任驱动（设计 v2.1 第八节）")
+print("=" * 70)
+
+
+def style(k: str) -> tuple:
+    # 占位符一次性给全（多余的 key 会被 str.format 忽略），只为拿到展示口径
+    q = codes.payload(k, limit="300 MB", minutes=1, ext=".mp4",
+                      options="mp4 / mov", advice="分段粘贴")
+    return q["level"], q["show_code"], q["show_diag"]
+
+
+chk("输入类（user 不可重试）：红、不摆码、不摆诊断",
+    style("DR-1005") == ("fail", False, False), str(style("DR-1005")))
+chk("输入类可重试（上传中断）：黄、摆码",
+    style("DR-2001") == ("warn", True, False), str(style("DR-2001")))
+chk("限流：黄、摆码（倒计时靠 retry_in_seconds）",
+    style("DR-3001") == ("warn", True, False), str(style("DR-3001")))
+chk("外部依赖：黄、摆码 + 诊断",
+    style("DR-4002") == ("warn", True, True), str(style("DR-4002")))
+chk("服务端：红、摆码 + 诊断",
+    style("DR-5003") == ("fail", True, True), str(style("DR-5003")))
+
+bad = []
+for k, c in codes.CODES.items():
+    lvl, sc, sd = style(k)
+    q = {"level": lvl, "show_code": sc, "show_diag": sd}
+    if q["level"] not in ("fail", "warn"):
+        bad.append(f"{k} level={q['level']!r}")
+    if c.responsibility == "user" and not c.retryable and (q["show_code"] or q["show_diag"]):
+        bad.append(f"{k} 输入类却摆码或诊断")
+    if c.responsibility == "us" and q["level"] != "fail":
+        bad.append(f"{k} 我们的锅却不是红")
+    if c.responsibility != "user" and not q["show_diag"]:
+        bad.append(f"{k} 非用户责任却不给诊断信息")
+chk("25 个码逐一符合展示口径", not bad, "; ".join(bad))
 
 print()
 print("=" * 70)

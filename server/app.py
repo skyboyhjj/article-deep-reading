@@ -67,6 +67,10 @@ BODY_LIMIT = 260_000
 # 超限时最多额外读掉多少再回复：够覆盖正常误操作，又不给恶意大包留带宽。
 DRAIN_MAX = 5 * 1024 * 1024
 
+# 版本号：/api/health 与 SSE 首帧都带上，用户复制的诊断信息里就有它。
+# 发版时改这一处，CHANGELOG 首个标题必须同号（test_web 会比对，防漂）。
+APP_VERSION = "2.30"
+
 # 上传：用户自己导出视频号视频后传上来，是拿到「原声」的唯一可靠路径
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "deepread_uploads"
 ALLOWED_EXT = {".mp4", ".mov", ".m4v", ".m4a", ".mp3", ".wav", ".aac",
@@ -243,6 +247,26 @@ class Handler(BaseHTTPRequestHandler):
         self._fail("DR-3001", headers={"Retry-After": str(sec)},
                    retry_in_seconds=sec, limit=LIMITER.current_limit(),
                    minutes=max(1, round(sec / 60)))
+
+    def _enrich_fail(self, ev: dict) -> None:
+        """流中 fail 帧补齐码表字段，与流前 JSON 用同一句话。
+
+        pipeline 只负责「挂在哪个阶段、是哪个码」，文案与分级一律从码表取。
+        附带的一个好处：pipeline 帧里的 `text` 可能夹着内部异常摘要
+        （如 `内部错误：KeyError: 'md'`），改成码表文案后不会再上页面。
+        """
+        key = ev.get("code") or "DR-5003"
+        try:
+            fields = codes.payload(key)
+        except KeyError:            # 未登记的码（pipeline 写了码表里没有的）
+            key = "DR-5003"
+            fields = codes.payload(key)
+        # 与流前 JSON 走同一个 payload：字段集一个字不差，改口径只改一处
+        ev.update(fields)
+        ev["code"] = key
+        ev["request_id"] = self._rid()
+        # text 留给不认识 error 字段的老页面；内容仍是人话，但已脱敏
+        ev["text"] = f"{ev['error']}。{ev['hint']}"
 
     # ---------- SSE ----------
     def _sse_open(self) -> None:
@@ -438,6 +462,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/health":
             self._json(200, {
                 "ok": True,
+                "version": APP_VERSION,
                 "llm": llm.is_configured(),
                 "asr": asr.is_configured(),
                 "asr_backend": asr.describe(),
@@ -533,14 +558,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             self._sse_open()
-            self._sse({"stage": "quota", "status": "ok", "text": f"本小时剩余 {left} 次"})
+            self._sse({"stage": "quota", "status": "ok", "text": f"本小时剩余 {left} 次",
+                       "request_id": self._rid(), "version": APP_VERSION})
             completed = False
             try:
                 for ev in pipeline.analyze(url, pasted, ptitle, media_path, media_name):
                     if ev.get("status") == "fail":
-                        # 流中错误：帧里补码与追踪号，并按码表决定是否写日志
-                        ev.setdefault("code", "DR-5003")
-                        ev["request_id"] = self._rid()
+                        # 流中错误：帧里补齐码表字段（文案 / 分级 / 追踪号），并按码表决定是否写日志
+                        self._enrich_fail(ev)
                         self._log_error(200, ev["code"])
                     self._sse(ev)
                 completed = True
@@ -549,9 +574,9 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:  # noqa: BLE001
                 try:
                     self._log_error(200, "DR-5003", f"{type(exc).__name__}: {exc}")
-                    self._sse({"stage": "error", "status": "fail", "code": "DR-5003",
-                               "text": codes.payload("DR-5003")["error"],
-                               "request_id": self._rid()})
+                    frame = {"stage": "error", "status": "fail", "code": "DR-5003"}
+                    self._enrich_fail(frame)
+                    self._sse(frame)
                 except OSError:
                     return
             finally:
