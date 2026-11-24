@@ -166,8 +166,11 @@ class Handler(BaseHTTPRequestHandler):
             rid = self._request_id = uuid.uuid4().hex[:8]
         return rid
 
-    def _log_error(self, status: int, err: str | None = None) -> None:
-        """一行式结构化日志。只记元信息，不记正文——与页面上的隐私承诺一致。"""
+    def _log_error(self, status: int, err: str | None = None, exc: str | None = None) -> None:
+        """一行式结构化日志。只记元信息，不记正文——与页面上的隐私承诺一致。
+
+        `exc` 是内部异常摘要（类型 + 消息），只进日志、绝不上页面。
+        """
         should = status >= 500
         if err is not None:
             should = codes.get(err).log
@@ -182,6 +185,8 @@ class Handler(BaseHTTPRequestHandler):
             "ms": int((time.time() - getattr(self, "_t0", time.time())) * 1000),
             "ip": ratelimit._hash_ip(self._client_ip())[:8],
         }
+        if exc:
+            rec["exc"] = exc
         print(json.dumps(rec, ensure_ascii=False), flush=True)
 
     # ---------- 基础 ----------
@@ -208,19 +213,36 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _json(self, code: int, obj: dict, headers: dict | None = None,
-              write_body: bool = True, err: str | None = None) -> None:
-        """JSON 返回。`err` 传错误码（P0-b 起逐个填），决定要不要写日志。"""
+              write_body: bool = True, err: str | None = None,
+              exc: str | None = None) -> None:
+        """JSON 返回。`err` 传错误码，决定要不要写日志；`exc` 只进日志。"""
         if code >= 400:
-            self._log_error(code, err)
+            self._log_error(code, err, exc)
         self._send(code, json.dumps(obj, ensure_ascii=False).encode(),
                    "application/json; charset=utf-8", headers, write_body=write_body)
+
+    def _fail(self, key: str, headers: dict | None = None, write_body: bool = True,
+              retry_in_seconds: float | None = None, log_exc: str | None = None,
+              **fmt) -> None:
+        """统一错误出口。码表决定状态码与文案，这里只负责拼装与发送。
+
+        - `fmt`：文案里的占位符（如 limit / minutes / ext / options）
+        - `retry_in_seconds`：写进 body，供前端倒计时；HTTP 头 Retry-After 由调用方放 headers
+        - `log_exc`：内部异常摘要，只进日志，不上页面
+        """
+        c = codes.get(key)
+        body = codes.payload(key, **fmt)
+        body["ok"] = False
+        body["request_id"] = self._rid()
+        body["retry_in_seconds"] = retry_in_seconds
+        self._json(c.http, body, headers, write_body=write_body, err=key, exc=log_exc)
 
     def _exceeded(self, retry_after: float | None) -> None:
         """额度用尽：429 + Retry-After，让客户端能明确告知「约 X 后恢复」。"""
         sec = int(round(retry_after)) if retry_after else 0
-        self._json(429, {"error": f"每小时限 {LIMITER.current_limit()} 次，请稍后再试",
-                         "retry_in_seconds": sec},
-                   headers={"Retry-After": str(sec)})
+        self._fail("DR-3001", headers={"Retry-After": str(sec)},
+                   retry_in_seconds=sec, limit=LIMITER.current_limit(),
+                   minutes=max(1, round(sec / 60)))
 
     # ---------- SSE ----------
     def _sse_open(self) -> None:
@@ -272,7 +294,7 @@ class Handler(BaseHTTPRequestHandler):
         if _slots.acquire(timeout=SLOT_WAIT):
             return True
         self.close_connection = True
-        self._json(503, {"error": f"同时进行的任务已达 {MAX_CONCURRENT} 个，请稍后重试"})
+        self._fail("DR-3002")
         return False
 
     # ---------- 上传 ----------
@@ -299,24 +321,24 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             size = 0
         if size <= 0:
-            self._json(400, {"error": "缺少 Content-Length"})
+            self._fail("DR-2001")
             return
         if size > MAX_UPLOAD:
-            self._json(413, {"error": f"文件超过上限 {MAX_UPLOAD // 1024 // 1024} MB"})
+            self._fail("DR-2002", limit=MAX_UPLOAD // 1024 // 1024)
             return
 
         raw_name = unquote(self.headers.get("X-Filename") or "upload")
         ext = media.ext_of(raw_name)
         if ext not in ALLOWED_EXT:
-            self._json(400, {"error": f"不支持的文件类型 {ext or '(无扩展名)'}；"
-                                      f"可选：{', '.join(sorted(ALLOWED_EXT))}"})
+            self._fail("DR-2003", ext=ext or "(无扩展名)",
+                       options=", ".join(sorted(ALLOWED_EXT)))
             return
         name = media.safe_filename(raw_name, ext=ext)
 
         ok, left, state, retry_after = LIMITER.allow(self._client_ip())
         if not ok:
             if state == "unavailable":
-                self._json(503, {"error": "限流服务暂不可用，请稍后再试"})
+                self._fail("DR-3003")
             else:
                 self._exceeded(retry_after)
             return
@@ -336,12 +358,12 @@ class Handler(BaseHTTPRequestHandler):
                     written += len(chunk)
         except OSError as exc:
             dst.unlink(missing_ok=True)
-            self._json(500, {"error": f"写入失败：{exc}"})
+            self._fail("DR-5002", log_exc=f"{type(exc).__name__}: {exc}")
             return
 
         if written != size:
             dst.unlink(missing_ok=True)
-            self._json(400, {"error": f"传输不完整（{written}/{size} 字节）"})
+            self._fail("DR-2006")
             return
 
         self._json(200, {
@@ -361,17 +383,20 @@ class Handler(BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             n = 0
-        if n <= 0 or n > 4096:
-            self._json(400, {"error": "请求体缺失或过大"})
+        if n <= 0:
+            self._fail("DR-1001")
+            return
+        if n > 4096:
+            self._fail("DR-1002", limit="4 KB", advice="重新提交")
             return
         try:
             payload = json.loads(self.rfile.read(n) or b"{}")
         except json.JSONDecodeError:
-            self._json(400, {"error": "JSON 解析失败"})
+            self._fail("DR-1003")
             return
         uid = str(payload.get("id", "")).strip()
         if not (uid.isalnum() and len(uid) == 16):
-            self._json(400, {"error": "upload id 非法"})
+            self._fail("DR-2004")
             return
         removed = 0
         for f in sorted(UPLOAD_DIR.glob(f"{uid}__*")):
@@ -398,7 +423,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 body = (WEB / "index.html").read_bytes()
             except OSError:
-                self._json(500, {"error": "前端文件缺失"}, write_body=write_body)
+                self._fail("DR-5001", write_body=write_body)
                 return
             self._send(200, body, "text/html; charset=utf-8", write_body=write_body)
             return
@@ -406,7 +431,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 body = (WEB / "og.jpg").read_bytes()
             except OSError:
-                self._json(404, {"error": "not found"}, write_body=write_body)
+                self._fail("DR-1007", write_body=write_body)
                 return
             self._send(200, body, "image/jpeg", write_body=write_body)
             return
@@ -425,7 +450,7 @@ class Handler(BaseHTTPRequestHandler):
                 "max_concurrent": MAX_CONCURRENT,
             }, write_body=write_body)
             return
-        self._json(404, {"error": "not found"}, write_body=write_body)
+        self._fail("DR-1007", write_body=write_body)
 
     def do_POST(self) -> None:  # noqa: N802
         self._mark()
@@ -443,7 +468,7 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_drop()
             return
         if path != "/api/analyze":
-            self._json(404, {"error": "not found"})
+            self._fail("DR-1007")
             return
 
         try:
@@ -451,20 +476,20 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             n = 0
         if n <= 0:
-            self._json(400, {"error": "请求体缺失"})
+            self._fail("DR-1001")
             return
         if n > BODY_LIMIT:
             # 260 KB 是防内存的硬闸。中文一字 3 字节，所以实际能粘的汉字远少于字符上限，
             # 这里直接把真实可用量写出来，别让用户对着「20 万字符」白贴一遍。
             if n <= DRAIN_MAX:      # 常规超限：读完再回，客户端才收得到这条提示
                 self._drain(n)
-            self._json(400, {"error": f"请求体过大（上限 {round(BODY_LIMIT / 1024)} KB，"
-                                      "中文约 8.6 万汉字）；长文请分段粘贴"})
+            self._fail("DR-1002", limit=f"{round(BODY_LIMIT / 1024)} KB，中文约 8.6 万字",
+                       advice="长文请分段粘贴")
             return
         try:
             payload = json.loads(self.rfile.read(n) or b"{}")
         except json.JSONDecodeError:
-            self._json(400, {"error": "JSON 解析失败"})
+            self._fail("DR-1003")
             return
 
         url = extract_url(payload.get("url", ""))
@@ -475,31 +500,31 @@ class Handler(BaseHTTPRequestHandler):
         media_path, media_name = "", ""
         if upload_id:
             if not upload_id.isalnum():
-                self._json(400, {"error": "upload_id 非法"})
+                self._fail("DR-2004")
                 return
             hits = sorted(UPLOAD_DIR.glob(f"{upload_id}__*"))
             if not hits:
-                self._json(404, {"error": "上传件不存在或已过期，请重新上传"})
+                self._fail("DR-2005")
                 return
             media_path = str(hits[0])
             media_name = hits[0].name.split("__", 1)[-1]
 
         if not pasted and not upload_id and not url.startswith(("http://", "https://")):
-            self._json(400, {"error": "请提供链接、粘贴正文，或上传音视频"})
+            self._fail("DR-1004")
             return
         if len(pasted) > 200_000:
-            self._json(400, {"error": "粘贴正文过长（上限 20 万字符）"})
+            self._fail("DR-1006")
             return
         # 正文不足 200 字、又没有链接或音视频时，pipeline 也只会回「没有可用输入」。
         # 与其扣掉额度再报错，不如进 pipeline 前就 400（阈值与 pipeline 的正文判定一致）。
         if pasted and not upload_id and not url.startswith(("http://", "https://")) and len(pasted) < 200:
-            self._json(400, {"error": "正文太短（不足 200 字），请粘贴完整内容，或改用链接 / 上传音视频"})
+            self._fail("DR-1005")
             return
 
         ok, left, state, retry_after = LIMITER.allow(self._client_ip())
         if not ok:
             if state == "unavailable":
-                self._json(503, {"error": "限流服务暂不可用，请稍后再试"})
+                self._fail("DR-3003")
             else:
                 self._exceeded(retry_after)
             return
@@ -512,14 +537,21 @@ class Handler(BaseHTTPRequestHandler):
             completed = False
             try:
                 for ev in pipeline.analyze(url, pasted, ptitle, media_path, media_name):
+                    if ev.get("status") == "fail":
+                        # 流中错误：帧里补码与追踪号，并按码表决定是否写日志
+                        ev.setdefault("code", "DR-5003")
+                        ev["request_id"] = self._rid()
+                        self._log_error(200, ev["code"])
                     self._sse(ev)
                 completed = True
             except BrokenPipeError:
                 return  # 客户端断开（不算读完，保留上传件以便重试）
             except Exception as exc:  # noqa: BLE001
                 try:
-                    self._sse({"stage": "error", "status": "fail",
-                               "text": f"服务异常：{type(exc).__name__}: {exc}"})
+                    self._log_error(200, "DR-5003", f"{type(exc).__name__}: {exc}")
+                    self._sse({"stage": "error", "status": "fail", "code": "DR-5003",
+                               "text": codes.payload("DR-5003")["error"],
+                               "request_id": self._rid()})
                 except OSError:
                     return
             finally:

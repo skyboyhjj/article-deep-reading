@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.28**（2026-11-24）
+- 当前版本：**v2.29**（2026-11-24）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、17 套 CI 测试。
 
@@ -502,6 +502,15 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **测试**：新增 `test_codes.py` 50 项（码表自洽、异常↔码一致、同 condition 多码显式保留）；`test_app` 60 → 65
 - **下一步（P0-b）**：构造器 `_fail` 落在 `_json` 之上、`write_body` 透传；`_exceeded` 改 `_fail("DR-3001")` 且**保留 `Retry-After` 头**
 - **文件**：`server/codes.py`、`server/app.py`、`server/llm.py`、`asr.py`、`extract.py`、`media.py`、`ratelimit.py`、`search.py`、`safe_eval.py`、`server/test_codes.py`、`server/test_app.py`
+
+### 35. 错误码体系 P0-b（v2.29）
+
+- **做了什么**：`_fail` 构造器落地（`_json` 之上，`write_body` 透传）；`app.py` 24 处错误返回全改走它；`_exceeded` 改 `_fail("DR-3001")` 并保留 `Retry-After`；`pipeline.py` 8 处流中 fail 帧带码；app 兜底帧脱敏
+- **错误体八字段**：`ok / code / condition / error / hint / retryable / retry_in_seconds / request_id`
+- **关键判断**：`Retry-After`（头）与 `retry_in_seconds`（体）必须同时给，不是同一件事的两种写法
+- **踩到的坑**：`b"a" b"x" * 10` 在 Python 里先隐式连接再乘，等于 `b"ax" * 10`——写「声明 100 字节只发 10 字节」的测试时被它骗了一轮，服务端读满 100 返回 200。必须写成 `b"a" + b"x" * 10`
+- **测试**：`test_app` 65 → 70；21 处文案断言全迁码断言；25 个码均有触发用例
+- **文件**：`server/app.py`、`server/pipeline.py`、`server/test_app.py`、`CHANGELOG.md`
 
 ## 待办
 

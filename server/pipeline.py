@@ -1663,7 +1663,7 @@ def analyze(
             doc = extract.fetch(url)
         except extract.FetchError as exc:
             if not has_media:
-                yield {"stage": "extract", "status": "fail",
+                yield {"stage": "extract", "status": "fail", "code": "DR-4003",
                        "text": f"抓取失败：{exc}（可改用「粘贴正文」或上传音视频）"}
                 return
             doc = {
@@ -1672,7 +1672,7 @@ def analyze(
                 "notes": [f"页面抓取失败（{exc}），只用了上传的音视频"],
             }
     else:
-        yield {"stage": "extract", "status": "fail",
+        yield {"stage": "extract", "status": "fail", "code": "DR-1004",
                "text": "没有可用输入：链接、正文、音视频至少给一样"}
         return
 
@@ -1692,7 +1692,7 @@ def analyze(
 
     if has_media:
         if not asr.is_configured():
-            yield {"stage": "transcribe", "status": "fail",
+            yield {"stage": "transcribe", "status": "fail", "code": "DR-4006",
                    "text": f"无法转写上传的音视频：{asr.describe()}"}
             return
         yield {"stage": "transcribe", "status": "run",
@@ -1715,7 +1715,8 @@ def analyze(
             except Exception:      # noqa: BLE001  画像失败绝不影响主流程
                 voice_acoustic, voice_duration = None, 0.0
         except (media.MediaError, asr.ASRError) as exc:
-            yield {"stage": "transcribe", "status": "fail", "text": f"转写失败：{exc}"}
+            yield {"stage": "transcribe", "status": "fail", "code": "DR-4004",
+                   "text": f"转写失败：{exc}"}
             return
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
@@ -1759,7 +1760,7 @@ def analyze(
         }
 
     if not llm.is_configured():
-        yield {"stage": "extract", "status": "fail",
+        yield {"stage": "extract", "status": "fail", "code": "DR-4001",
                "text": "服务端未配置 LLM_API_KEY，无法继续（不降级为假报告）"}
         return
 
@@ -1841,8 +1842,10 @@ def analyze(
         yield {"stage": "done", "status": "ok", "text": f"完成（{len(md)} 字符）",
                "data": {"md": md, "brief": brief, "calc": calc_md}}
     except llm.LLMNotConfigured as exc:
-        yield {"stage": "triage", "status": "fail", "text": str(exc)}
+        yield {"stage": "triage", "status": "fail", "code": "DR-4001", "text": str(exc)}
     except llm.LLMError as exc:
-        yield {"stage": "triage", "status": "fail", "text": f"模型调用失败：{exc}"}
+        yield {"stage": "triage", "status": "fail", "code": "DR-4002",
+               "text": f"模型调用失败：{exc}"}
     except Exception as exc:  # noqa: BLE001
-        yield {"stage": "triage", "status": "fail", "text": f"内部错误：{type(exc).__name__}: {exc}"}
+        yield {"stage": "triage", "status": "fail", "code": "DR-5003",
+               "text": f"内部错误：{type(exc).__name__}: {exc}"}

@@ -11,6 +11,7 @@
 `pipeline.analyze` 替换，只验 SSE 的形状与收尾。
 """
 import http.client
+import socket
 import ipaddress
 import json
 import os
@@ -122,8 +123,9 @@ class TestRequestId(Base):
         """5xx 一定写日志，且日志里的 rid 与响应头一致。"""
         with mock.patch.object(app, "WEB", Path("/nonexistent-web")):
             with mock.patch("builtins.print") as printed:
-                status, headers, _ = request("GET", "/")
+                status, headers, body = request("GET", "/")
         self.assertEqual(status, 500)
+        self.assertEqual(json.loads(body)["code"], "DR-5001")
         lines = [str(c.args[0]) for c in printed.call_args_list if c.args]
         recs = [l for l in lines if l.startswith("{")]
         self.assertTrue(recs, "5xx 应写一条 JSON 日志")
@@ -132,6 +134,48 @@ class TestRequestId(Base):
             self.assertIn(k, obj)
         self.assertEqual(obj["http"], 500)
         self.assertEqual(obj["rid"], headers.get("X-Request-Id"))
+
+    def test_storage_write_failure_is_coded(self):
+        """写盘失败要给用户一句人话 + 一个码，原始异常只进日志（不上页面）。"""
+        with mock.patch("builtins.open", side_effect=OSError("disk full")):
+            with mock.patch("builtins.print"):
+                status, headers, body = request(
+                    "POST", "/api/upload", body=b"RIFF0000WAVE",
+                    headers={"Content-Type": "application/octet-stream",
+                             "X-Filename": "a.wav", "Content-Length": "12"})
+        self.assertEqual(status, 500)
+        obj = json.loads(body)
+        self.assertEqual(obj["code"], "DR-5002")
+        self.assertNotIn("disk full", obj["error"] + obj["hint"])
+
+
+class TestErrorShape(Base):
+    """错误响应体的字段契约。前端与文档都依赖这些字段名，改动必须过这里。"""
+
+    def test_user_error_body(self):
+        status, headers, body = post_json("/api/analyze", {"text": "短"})
+        obj = json.loads(body)
+        self.assertEqual(status, 400)
+        self.assertEqual(obj["code"], "DR-1005")
+        self.assertEqual(obj["condition"], "textTooShort")
+        self.assertFalse(obj["ok"])
+        self.assertFalse(obj["retryable"])
+        self.assertIsNone(obj["retry_in_seconds"])
+        self.assertTrue(obj["error"])
+        self.assertTrue(obj["hint"])
+        self.assertRegex(obj["request_id"], r"^[0-9a-f]{8}$")
+        self.assertEqual(obj["request_id"], headers.get("X-Request-Id"))
+
+    def test_validation_error_carries_code(self):
+        """「没有可读解的内容」这类校验错误也要带码，否则前端分不出该改什么。"""
+        status, _, body = post_json("/api/analyze", {"url": "", "text": ""})
+        self.assertEqual(status, 400)
+        self.assertEqual(json.loads(body)["code"], "DR-1004")
+
+    def test_unknown_path_has_code(self):
+        status, _, body = request("GET", "/api/nothing")
+        self.assertEqual(status, 404)
+        self.assertEqual(json.loads(body)["code"], "DR-1007")
 
 
 class TestGet(Base):
@@ -188,7 +232,7 @@ class TestGet(Base):
     def test_unknown_path_404(self):
         status, _, body = request("GET", "/nope")
         self.assertEqual(status, 404)
-        self.assertIn("not found", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-1007")
 
     def test_query_string_stripped(self):
         # 分享链接常带 utm / ref 等参数，路径匹配必须忽略 ? 之后的部分，
@@ -206,14 +250,14 @@ class TestAnalyzeValidation(Base):
         status, _, body = request("POST", "/api/analyze", body=b"",
                                   headers={"Content-Length": "0"})
         self.assertEqual(status, 400)
-        self.assertEqual(json.loads(body)["error"], "请求体缺失")
+        self.assertEqual(json.loads(body)["code"], "DR-1001")
 
     def test_oversize_body(self):
         payload = b"x" * 260_001
         status, _, body = request("POST", "/api/analyze", body=payload,
                                   headers={"Content-Length": str(len(payload))})
         self.assertEqual(status, 400)
-        self.assertIn("过大", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-1002")
 
     def test_oversize_does_not_poison_next_request(self):
         """超限时若把 body 读完再回，同一连接上的下一个请求才不会解析错乱。"""
@@ -237,34 +281,34 @@ class TestAnalyzeValidation(Base):
         status, _, body = request("POST", "/api/analyze", body=b"{not json",
                                   headers={"Content-Length": "9"})
         self.assertEqual(status, 400)
-        self.assertIn("JSON 解析失败", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-1003")
 
     def test_upload_id_not_alnum(self):
         status, _, body = post_json("/api/analyze", {"upload_id": "../../etc"})
         self.assertEqual(status, 400)
-        self.assertIn("upload_id 非法", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-2004")
 
     def test_upload_id_missing_on_disk(self):
         status, _, body = post_json("/api/analyze", {"upload_id": "deadbeef0000"})
         self.assertEqual(status, 404)
-        self.assertIn("不存在或已过期", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-2005")
 
     def test_nothing_provided(self):
         status, _, body = post_json("/api/analyze", {"url": "ftp://x/y"})
         self.assertEqual(status, 400)
-        self.assertIn("请提供链接", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-1004")
 
     def test_pasted_text_too_long(self):
         """用 ASCII 才测得到这条分支：20 万字符 = 20 万字节，未撞 26 万字节的体量上限。"""
         status, _, body = post_json("/api/analyze", {"text": "x" * 200_001})
         self.assertEqual(status, 400)
-        self.assertIn("过长", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-1006")
 
     def test_pasted_text_too_short(self):
         """正文不足 200 字、又没链接/音视频时，进 pipeline 前就该 400，不能白扣额度。"""
         status, _, body = post_json("/api/analyze", {"text": "太短了"})
         self.assertEqual(status, 400)
-        self.assertIn("正文太短", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-1005")
 
     def test_chinese_hits_body_limit_first(self):
         """中文 20 万字符 = 60 万字节，先撞 260 KB 那道闸。
@@ -276,10 +320,10 @@ class TestAnalyzeValidation(Base):
         """
         status, _, body = post_json("/api/analyze", {"text": "字" * 200_001})
         self.assertEqual(status, 400)
-        msg = json.loads(body)["error"]
-        self.assertIn("请求体过大", msg)
-        self.assertIn("8.6 万汉字", msg)
-        self.assertIn("分段", msg)
+        obj = json.loads(body)
+        self.assertEqual(obj["code"], "DR-1002")
+        self.assertIn("8.6 万", obj["error"])
+        self.assertIn("分段", obj["hint"])
 
     def test_unknown_post_path(self):
         status, _, _ = post_json("/api/nope", {})
@@ -316,17 +360,21 @@ class TestAnalyzeStream(Base):
         self.assertEqual(status, 200)
         text = body.decode()
         self.assertIn('"stage": "error"', text)
+        self.assertIn('"code": "DR-5003"', text)
         self.assertIn("服务异常", text)
-        self.assertIn("模型挂了", text)
+        self.assertNotIn("模型挂了", text)   # 内部细节只进日志，不上页面
 
     def test_rate_limit_blocks_second_call(self):
         with mock.patch.object(app, "LIMITER", ratelimit.MemoryRateLimiter(1)), \
                 mock.patch.object(app.pipeline, "analyze", self._fake({"stage": "done"})):
             first, _, _ = post_json("/api/analyze", {"url": "https://example.com/c"})
-            second, _, body = post_json("/api/analyze", {"url": "https://example.com/c"})
+            second, headers, body = post_json("/api/analyze", {"url": "https://example.com/c"})
         self.assertEqual(first, 200)
         self.assertEqual(second, 429)
-        self.assertIn("每小时限", json.loads(body)["error"])
+        obj = json.loads(body)
+        self.assertEqual(obj["code"], "DR-3001")
+        # Retry-After（头，给非 JS 客户端）与 retry_in_seconds（体，给前端倒计时）必须一致
+        self.assertEqual(obj["retry_in_seconds"], int(headers.get("Retry-After", "-1")))
 
     def test_analyze_deletes_temp_media(self):
         """上传件用完即删 —— 不删会在 temp 里攒一堆视频。
@@ -403,7 +451,30 @@ class TestUpload(Base):
         status, _, body = request("POST", "/api/upload", body=b"",
                                   headers={"X-Filename": "a.mp4"})
         self.assertEqual(status, 400)
-        self.assertIn("缺少 Content-Length", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-2001")
+
+    def test_truncated_upload_is_coded(self):
+        """声明 100 字节只发 10 字节：读到 EOF 就该报「上传不完整」，不能静默收下。"""
+        sock = socket.create_connection((HOST, PORT), timeout=10)
+        try:
+            sock.sendall(b"POST /api/upload HTTP/1.1\r\n"
+                         b"Host: 127.0.0.1\r\n"
+                         b"Connection: close\r\n"
+                         b"Content-Type: application/octet-stream\r\n"
+                         b"X-Filename: a.wav\r\n"
+                         b"Content-Length: 100\r\n\r\n"
+                         + b"x" * 10)   # 必须用 + 连接：`b"a" b"x" * 10` 会先结合成 b"ax" 再乘
+            sock.shutdown(socket.SHUT_WR)
+            data = b""
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+        finally:
+            sock.close()
+        self.assertIn(b"400", data.split(b"\r\n")[0])
+        self.assertIn(b"DR-2006", data)
 
     def test_over_limit(self):
         blob = b"\0" * 64
@@ -412,7 +483,7 @@ class TestUpload(Base):
                                       headers={"Content-Length": str(len(blob)),
                                                "X-Filename": "a.mp4"})
         self.assertEqual(status, 413)
-        self.assertIn("超过上限", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-2002")
 
     def test_rejects_bad_extension(self):
         blob = b"\0" * 32
@@ -420,7 +491,7 @@ class TestUpload(Base):
                                   headers={"Content-Length": str(len(blob)),
                                            "X-Filename": "evil.sh"})
         self.assertEqual(status, 400)
-        self.assertIn("不支持的文件类型", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-2003")
 
     def test_accepts_video_and_reports(self):
         blob = b"\0" * 4096
@@ -461,7 +532,7 @@ class TestUpload(Base):
             f.unlink(missing_ok=True)
         self.assertEqual(first, 200)
         self.assertEqual(second, 429)
-        self.assertIn("每小时限", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-3001")
 
     def test_path_traversal_in_filename_sanitized(self):
         blob = b"\0" * 16
@@ -560,7 +631,7 @@ class TestUploadDrop(Base):
         post_json("/api/upload/drop", {"id": uid})
         status, _, body = post_json("/api/analyze", {"upload_id": uid})
         self.assertEqual(status, 404)
-        self.assertIn("不存在或已过期", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-2005")
 
     def test_drop_does_not_consume_quota(self):
         """删除是收尾动作，收费会让人宁可留着不删。"""
@@ -585,7 +656,7 @@ class TestConcurrency(Base):
                 mock.patch.object(app, "SLOT_WAIT", 0.05):
             status, _, body = post_json("/api/analyze", {"url": "https://example.com/a"})
         self.assertEqual(status, 503)
-        self.assertIn("同时进行的任务已达", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-3002")
 
     def test_busy_upload_returns_503(self):
         blob = b"\0" * 16
@@ -595,7 +666,7 @@ class TestConcurrency(Base):
                                       headers={"Content-Length": str(len(blob)),
                                                "X-Filename": "a.mp4"})
         self.assertEqual(status, 503)
-        self.assertIn("同时进行的任务已达", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-3002")
 
     def test_slot_released_after_success(self):
         """额度只有 1：第一个没还回来，第二个就会 503。"""
@@ -668,7 +739,7 @@ class TestClientIp(Base):
             second, _, body = self._call("9.9.9.2")
         self.assertEqual(first, 200)
         self.assertEqual(second, 429)
-        self.assertIn("每小时限", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-3001")
 
     def test_header_used_when_peer_trusted(self):
         """peer 在名单里时，不同的 X-Real-IP 各算各的额度。"""
@@ -680,7 +751,7 @@ class TestClientIp(Base):
             third, _, body = self._call("9.9.9.1")
         self.assertEqual((first, second), (200, 200))
         self.assertEqual(third, 429)
-        self.assertIn("每小时限", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-3001")
 
     def test_cidr_trust(self):
         """按网段信任（容器重建后 IP 会变，只写单 IP 会悄悄失效）。"""
@@ -712,7 +783,7 @@ class TestClientIp(Base):
         with mock.patch.object(app, "LIMITER", Down()):
             status, _, body = self._call()
         self.assertEqual(status, 503)
-        self.assertIn("限流服务暂不可用", json.loads(body)["error"])
+        self.assertEqual(json.loads(body)["code"], "DR-3003")
 
 
 class TestRateWindow(Base):
