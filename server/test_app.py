@@ -91,6 +91,49 @@ class Base(unittest.TestCase):
         return cond()
 
 
+class TestRequestId(Base):
+    """每请求一个追踪号：响应头带出来，用户报障时截图即可对号；5xx 另写一行日志。"""
+
+    def test_header_present_and_hex(self):
+        status, headers, _ = request("GET", "/")
+        self.assertEqual(status, 200)
+        rid = headers.get("X-Request-Id")
+        self.assertTrue(rid, "响应头缺 X-Request-Id")
+        self.assertRegex(rid, r"^[0-9a-f]{8}$")
+
+    def test_unique_per_request(self):
+        _, h1, _ = request("GET", "/")
+        _, h2, _ = request("GET", "/")
+        self.assertNotEqual(h1.get("X-Request-Id"), h2.get("X-Request-Id"))
+
+    def test_present_on_client_error(self):
+        status, headers, _ = post_json("/api/analyze", {"text": "短"})
+        self.assertEqual(status, 400)
+        self.assertRegex(headers.get("X-Request-Id", ""), r"^[0-9a-f]{8}$")
+
+    def test_no_log_for_user_error(self):
+        """输入类错误不写日志——否则日志被「正文太短」刷满，真正要看的 5xx 被淹没。"""
+        with mock.patch("builtins.print") as printed:
+            post_json("/api/analyze", {"text": "短"})
+        lines = [str(c.args[0]) for c in printed.call_args_list if c.args]
+        self.assertFalse([l for l in lines if l.startswith("{")], "4xx 输入错误不应写结构化日志")
+
+    def test_log_written_for_server_error(self):
+        """5xx 一定写日志，且日志里的 rid 与响应头一致。"""
+        with mock.patch.object(app, "WEB", Path("/nonexistent-web")):
+            with mock.patch("builtins.print") as printed:
+                status, headers, _ = request("GET", "/")
+        self.assertEqual(status, 500)
+        lines = [str(c.args[0]) for c in printed.call_args_list if c.args]
+        recs = [l for l in lines if l.startswith("{")]
+        self.assertTrue(recs, "5xx 应写一条 JSON 日志")
+        obj = json.loads(recs[0])
+        for k in ("ts", "rid", "http", "path", "ms", "ip"):
+            self.assertIn(k, obj)
+        self.assertEqual(obj["http"], 500)
+        self.assertEqual(obj["rid"], headers.get("X-Request-Id"))
+
+
 class TestGet(Base):
     def test_index_served(self):
         status, headers, body = request("GET", "/")

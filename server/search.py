@@ -29,11 +29,13 @@ GOOD_AUTHORITY = 3
 
 
 class SearchError(RuntimeError):
-    pass
+    """检索失败 —— 这是降级不是错误：流程继续，报告标「未溯源」。"""
+    notice = "search_unavailable"
 
 
 class SearchNotConfigured(SearchError):
     """没配 key —— 上层据此跳过溯源，报告里如实写「未溯源」。"""
+    notice = "search_unavailable"
 
 
 def config() -> dict:

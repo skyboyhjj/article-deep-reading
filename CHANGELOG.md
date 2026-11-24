@@ -6,6 +6,22 @@
 
 ---
 
+## v2.28 · 2026-11-24
+
+**错误码体系 P0-a：码表、异常持码、追踪号、结构化日志。对外行为不变。**
+
+这一版只打地基，不加任何响应用户可见的字段——`code` 要等 P0-b 的构造器才进返回体。
+
+- 新增 `server/codes.py`：25 个错误码，每个九个字段（condition / stage_scope / http / 文案 / 提示 / 可重试 / 责任方 / 是否记日志）。**码稳定、文案可变**——测试断言码，不断言文案。
+- 11 个异常类逐个定去处：7 个带 `code`（LLM 两个、ASR 两个、Fetch、Media、RateLimiter），4 个带 `notice` 走降级而非错误（Search 两个 → `search_unavailable`，safe_eval 两个 → `calc_untrusted`）。
+- 每请求生成 8 位追踪号，写在响应头 `X-Request-Id`（JSON 与 SSE 两个出口都有）。用户报障时截图这一串即可对号。
+- 5xx 与「需要看日志」的码写一行结构化 JSON（`ts / rid / code / http / path / ms / ip`），IP 复用限流已有的 `sha256(RL_SALT+ip)[:32]`。输入类错误不写日志，免得把日志刷满。
+- 新增 `server/test_codes.py`（50 项自检：码表自洽、异常 ↔ 码一致、同 condition 多码显式保留）；`test_app` 新增 5 项（追踪号格式与唯一性、4xx 不写日志、5xx 日志的 rid 与响应头一致）。
+
+下一步 P0-b 才动构造器与 `write_body`，并与 `_exceeded` 的 `Retry-After` 一起改。
+
+---
+
 ## v2.27 · 2026-11-24
 
 **补 HEAD 支持（分享卡片 og:image 探测不再 501）+ 部署文档补 gzip 与限流口径。**

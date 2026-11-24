@@ -24,7 +24,8 @@ AUDIO_BITRATE = "32k"
 
 
 class MediaError(RuntimeError):
-    pass
+    """媒体处理失败（音频抽取、时长探测等）。"""
+    code = "DR-4005"
 
 
 def has_ffmpeg() -> bool:

@@ -20,11 +20,13 @@ import requests
 
 
 class LLMError(RuntimeError):
-    pass
+    """外部模型调用失败（可重试）。"""
+    code = "DR-4002"
 
 
 class LLMNotConfigured(LLMError):
     """未配置 key —— 服务应据此返回 503，而不是静默降级。"""
+    code = "DR-4001"
 
 
 def config() -> dict:

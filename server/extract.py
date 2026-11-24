@@ -40,6 +40,7 @@ BLOCK_TAGS = [
 
 class FetchError(RuntimeError):
     """抓取失败：网络、反爬、结构变更。"""
+    code = "DR-4003"
 
 
 def detect_kind(url: str) -> str:

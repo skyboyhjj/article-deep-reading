@@ -45,6 +45,7 @@ def _hash_ip(ip: str) -> str:
 
 class RateLimiterError(RuntimeError):
     """限流服务不可用。"""
+    code = "DR-3003"
 
 
 def _now() -> float:

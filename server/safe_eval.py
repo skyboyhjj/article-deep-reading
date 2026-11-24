@@ -63,11 +63,13 @@ _FUNCS: dict[str, Any] = {
 
 
 class UnsafeExpression(ValueError):
-    """表达式违反白名单规则。"""
+    """表达式违反白名单规则。属降级：这一步不可信，但报告继续出。"""
+    notice = "calc_untrusted"
 
 
 class EvalError(ValueError):
-    """表达式合法但计算失败（除以零、定义域外等）。"""
+    """表达式合法但计算失败（除以零、定义域外等）。属降级，同上。"""
+    notice = "calc_untrusted"
 
 
 def _reject(node: ast.AST) -> None:

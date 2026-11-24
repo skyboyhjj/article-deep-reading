@@ -41,11 +41,13 @@ DEFAULT_MAX_SEC = 1200
 
 
 class ASRError(RuntimeError):
-    pass
+    """转写失败（可换文件重试）。"""
+    code = "DR-4004"
 
 
 class ASRNotConfigured(ASRError):
     """没配后端 —— 上层据此保持 L1（元宝总结），并如实说明。"""
+    code = "DR-4006"
 
 
 def config() -> dict:

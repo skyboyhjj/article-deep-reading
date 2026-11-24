@@ -27,6 +27,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 import asr
+import codes
 import llm
 import media
 import pipeline
@@ -153,12 +154,43 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:  # 静音默认日志
         pass
 
+    # ---------- 追踪号与结构化日志 ----------
+    def _mark(self) -> None:
+        """请求入口打点，供日志算耗时。"""
+        self._t0 = time.time()
+
+    def _rid(self) -> str:
+        """每请求一个 8 位追踪号。用户报障时截图这一串，我们据此翻日志。"""
+        rid = getattr(self, "_request_id", None)
+        if rid is None:
+            rid = self._request_id = uuid.uuid4().hex[:8]
+        return rid
+
+    def _log_error(self, status: int, err: str | None = None) -> None:
+        """一行式结构化日志。只记元信息，不记正文——与页面上的隐私承诺一致。"""
+        should = status >= 500
+        if err is not None:
+            should = codes.get(err).log
+        if not should:
+            return
+        rec = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "rid": self._rid(),
+            "code": err,
+            "http": status,
+            "path": urlsplit(self.path).path,
+            "ms": int((time.time() - getattr(self, "_t0", time.time())) * 1000),
+            "ip": ratelimit._hash_ip(self._client_ip())[:8],
+        }
+        print(json.dumps(rec, ensure_ascii=False), flush=True)
+
     # ---------- 基础 ----------
     def _send(self, code: int, body: bytes, ctype: str, headers: dict | None = None,
               write_body: bool = True) -> None:
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Request-Id", self._rid())
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Content-Security-Policy",
                          "default-src 'none'; script-src 'unsafe-inline'; "
@@ -175,7 +207,11 @@ class Handler(BaseHTTPRequestHandler):
         if write_body:
             self.wfile.write(body)
 
-    def _json(self, code: int, obj: dict, headers: dict | None = None, write_body: bool = True) -> None:
+    def _json(self, code: int, obj: dict, headers: dict | None = None,
+              write_body: bool = True, err: str | None = None) -> None:
+        """JSON 返回。`err` 传错误码（P0-b 起逐个填），决定要不要写日志。"""
+        if code >= 400:
+            self._log_error(code, err)
         self._send(code, json.dumps(obj, ensure_ascii=False).encode(),
                    "application/json; charset=utf-8", headers, write_body=write_body)
 
@@ -192,6 +228,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Accel-Buffering", "no")  # 让 nginx 不缓冲
+        self.send_header("X-Request-Id", self._rid())
         self.send_header("Access-Control-Allow-Origin", "*")
         # 不用 Transfer-Encoding: chunked：该头在 HTTP/2 下被禁止，nginx 反代时
         # 会触发 ERR_HTTP2_PROTOCOL_ERROR。改用 Connection: close，响应结束于连接关闭。
@@ -347,10 +384,12 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------- 路由 ----------
     def do_GET(self) -> None:  # noqa: N802
+        self._mark()
         self._route_get(write_body=True)
 
     def do_HEAD(self) -> None:  # noqa: N802
         """HEAD 与 GET 同头、无 body。分享卡片抓取常先 HEAD 探 og:image，此前 501 会挡掉预览。"""
+        self._mark()
         self._route_get(write_body=False)
 
     def _route_get(self, write_body: bool) -> None:
@@ -389,6 +428,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(404, {"error": "not found"}, write_body=write_body)
 
     def do_POST(self) -> None:  # noqa: N802
+        self._mark()
         path = urlsplit(self.path).path
         if path == "/api/upload":
             if not self._acquire_slot():

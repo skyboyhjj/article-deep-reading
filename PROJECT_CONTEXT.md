@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.23**（2026-11-20）
+- 当前版本：**v2.28**（2026-11-24）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、17 套 CI 测试。
 
@@ -492,6 +492,16 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **前置修复（在伦理页侧）**：原 hash 路由是 `if (hash && getElementById(hash)) activateTab(hash, true)` —— 任何存在的 id 都被当成 tab id，`#data-rules` 会让四个 tab 的 `active` 全被移除、内容全部隐藏。改为只认 `.tab-btn[data-tab=...]`，其余锚点交给 `scrollToAnchor()`（激活所在 tab → 展开折叠块 → 滚动）
 - **测试**：`test_footer_links_to_ethics` 增加 `ethics#data-rules` 断言并做反向验证（去掉锚点即变红）
 - **文件**：`web/index.html`、`server/test_ui_contract.py`、`CHANGELOG.md`
+
+### 34. 错误码体系 P0-a（v2.28）
+
+- **起因**：24 处错误返回各自拼中文文案，用户报障无法对号；改一句文案牵连一串测试断言
+- **方案**：《设计_DeepRead错误体系_v2.1_20261124.md》——双层标识（`code` 对外报障 / `condition` 对内统计）、码表九字段、责任驱动分级（user / third / us）、错误与降级分家（判据：用户还能不能拿到报告）
+- **本版落地**：`server/codes.py`（25 码）；11 个异常类逐个定去处（7 个带 `code`、4 个带 `notice` 走降级）；每请求 8 位 `X-Request-Id`（JSON 与 SSE 两个出口）；结构化日志只写 5xx 与「需看日志」的码
+- **关键判断**：码稳定、文案可变——测试断言 code 不断言文案；输入类不写日志（否则被「正文太短」刷满，5xx 淹没）
+- **测试**：新增 `test_codes.py` 50 项（码表自洽、异常↔码一致、同 condition 多码显式保留）；`test_app` 60 → 65
+- **下一步（P0-b）**：构造器 `_fail` 落在 `_json` 之上、`write_body` 透传；`_exceeded` 改 `_fail("DR-3001")` 且**保留 `Retry-After` 头**
+- **文件**：`server/codes.py`、`server/app.py`、`server/llm.py`、`asr.py`、`extract.py`、`media.py`、`ratelimit.py`、`search.py`、`safe_eval.py`、`server/test_codes.py`、`server/test_app.py`
 
 ## 待办
 
