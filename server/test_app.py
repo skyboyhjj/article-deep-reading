@@ -289,6 +289,28 @@ class TestAnalyzeStream(Base):
         finally:
             fake.unlink(missing_ok=True)
 
+    def test_analyze_keeps_temp_media_on_pipeline_error(self):
+        """分析没正常跑完（模型异常/断流）不该删上传件 —— 删了用户就没法重试。
+
+        断流（BrokenPipeError）走 return、模型异常走 except，两条路径都到 finally
+        但 completed 为 False，都不该删。这里用抛异常模拟；真断流在单测里难以稳定构造。
+        """
+        app.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        fake = app.UPLOAD_DIR / "def67890__v.mp4"
+        fake.write_bytes(b"\0" * 32)
+        try:
+            def boom(*a, **k):
+                raise RuntimeError("模型挂了")
+                yield  # 让它成为生成器
+            with mock.patch.object(app.pipeline, "analyze", boom):
+                status, _, body = post_json("/api/analyze", {"upload_id": "def67890"})
+            self.assertEqual(status, 200)
+            self.assertIn("服务异常", body.decode())
+            self.assertTrue(fake.exists(),
+                            "分析异常时应保留上传件，供用户重试")
+        finally:
+            fake.unlink(missing_ok=True)
+
 
 class TestExtractUrl(unittest.TestCase):
     """输入框允许整段文字，服务端也要能从里面认出链接。"""

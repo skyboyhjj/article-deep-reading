@@ -455,11 +455,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self._sse_open()
             self._sse({"stage": "quota", "status": "ok", "text": f"本小时剩余 {left} 次"})
+            completed = False
             try:
                 for ev in pipeline.analyze(url, pasted, ptitle, media_path, media_name):
                     self._sse(ev)
+                completed = True
             except BrokenPipeError:
-                return  # 客户端断开
+                return  # 客户端断开（不算读完，保留上传件以便重试）
             except Exception as exc:  # noqa: BLE001
                 try:
                     self._sse({"stage": "error", "status": "fail",
@@ -471,7 +473,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._sse_close()
                 except OSError:
                     pass
-                if media_path:
+                if media_path and completed:
                     Path(media_path).unlink(missing_ok=True)
         finally:
             _slots.release()
