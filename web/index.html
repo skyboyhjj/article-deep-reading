@@ -75,14 +75,12 @@
   .note{color:var(--muted);font-size:13px;margin-top:12px;line-height:1.75}
   .note code{background:#f1efe9;padding:1px 5px;border-radius:4px;font-size:.92em}
 
-  .paste{margin-top:16px;font-size:14px}
-  .paste summary{cursor:pointer;color:var(--accent);font-size:14px}
-  .paste input[type=text],.paste textarea{
-    width:100%;margin-top:10px;padding:11px 13px;font-size:15px;
-    border:1px solid var(--line);border-radius:9px;background:var(--card);
-    font-family:inherit;color:var(--fg);resize:vertical;
+  #urlOverride{
+    display:none;margin:10px 0 0;padding:6px 12px;font-size:12.5px;
+    border:1px solid var(--sand);border-radius:8px;background:#fff;
+    color:var(--ink-soft);cursor:pointer;font-family:inherit;letter-spacing:0;
   }
-  .paste textarea{line-height:1.8}
+  #urlOverride:hover{border-color:var(--leaf);color:var(--accent)}
 
   .upload{margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .uplabel{font-size:13.5px;color:var(--ink-soft);letter-spacing:.5px}
@@ -254,18 +252,12 @@
   </div>
 
   <div class="box">
-    <textarea id="url" rows="2" inputmode="url" autocapitalize="off" autocorrect="off"
-           spellcheck="false" placeholder="粘贴文章链接，或含链接的文字" autocomplete="off"></textarea>
+    <textarea id="url" rows="4" inputmode="url" autocapitalize="off" autocorrect="off"
+           spellcheck="false" placeholder="粘贴文章链接，或直接把正文粘进来" autocomplete="off"></textarea>
     <button id="go">慧惠读解</button>
   </div>
   <div class="note" id="urlHint"></div>
-
-  <details class="paste">
-    <summary>不知道链接？直接粘贴内容</summary>
-    <input id="ptitle" type="text" placeholder="标题（可留空，默认取正文首行）" autocomplete="off">
-    <textarea id="ptext" rows="8" placeholder="把文章正文粘贴到这里（含数字的段落不要删，实算要用）"></textarea>
-    <div class="note">粘贴模式下无法核对作者序与发布时间，报告里会如实标「未核」。</div>
-  </details>
+  <button id="urlOverride" type="button">按链接读解</button>
 
   <div class="upload">
     <span class="uplabel">或原声读解</span>
@@ -373,6 +365,41 @@ function extractUrl(raw){
     u = u.slice(0, -1);
   }
   return u;
+}
+
+let urlOverride = false;   // 「长文+链接」时默认按正文；点了按钮才切到抓取链接
+
+/* 判定输入走哪种读解：链接 / 正文 / 无。
+   与后端「正文 ≥200 字优先」对齐：长文一律按正文，不抓内嵌链接。 */
+function detectInput(raw){
+  const typed = String(raw == null ? "" : raw).trim();
+  const url = extractUrl(typed);
+  if(url && typed.length < 200) return {mode:"url", url:url, text:"", typed:typed};
+  if(typed.length >= 200)       return {mode:"text", url:"", text:typed, typed:typed};
+  return {mode:"none", url:"", text:"", typed:typed};
+}
+
+/* 实时提示当前会走哪种读解；「长文+链接」时亮出「按链接读解」按钮 */
+function refreshHint(){
+  const d = detectInput($("url").value);
+  const hint = $("urlHint"), btn = $("urlOverride");
+  const inner = extractUrl(d.typed);
+
+  if(urlOverride && inner){
+    hint.innerHTML = "将按<b>链接</b>读解：" + esc(inner);
+    btn.style.display = "none";
+    return;
+  }
+  if(d.mode === "url"){
+    hint.innerHTML = "将按<b>链接</b>读解：" + esc(d.url);
+    btn.style.display = "none";
+  }else if(d.mode === "text"){
+    hint.innerHTML = "将按<b>正文</b>读解（约 " + d.typed.length + " 字，无法核对作者序与发布时间）";
+    btn.style.display = inner ? "inline-block" : "none";
+  }else{
+    hint.innerHTML = "";
+    btn.style.display = "none";
+  }
 }
 
 /* 极简 markdown 渲染：只覆盖本报告用到的语法。
@@ -532,21 +559,18 @@ function showExtract(d){
 
 async function run(){
   if(busy) return;
-  const typed = $("url").value.trim();
-  const text = $("ptext").value.trim();
-  const title = $("ptitle").value.trim();
-  const hasText = text.length >= 200;
+  const d = detectInput($("url").value);
+  let url = d.url, text = d.text;
 
-  // 文字里混着链接时取出来并回填，让「取了哪条」是可见的，而不是静默替换
-  let url = extractUrl(typed);
-  if(url && url !== typed){
-    $("url").value = url;
-    $("urlHint").textContent = "已从文字中提取链接，可自行修改";
+  // 长文里夹链接时默认按正文；用户点了「按链接读解」才切到抓取
+  if(urlOverride && d.mode === "text"){
+    const inner = extractUrl(d.typed);
+    if(inner){ url = inner; text = ""; }
   }
 
-  if(!hasText && !uploadId && !url){
-    $("err").textContent = typed
-      ? "没在文字里找到链接（需以 http:// 或 https:// 开头）"
+  if(d.mode === "none"){
+    $("err").textContent = d.typed
+      ? "正文不足 200 字，也没找到链接（链接需以 http:// 或 https:// 开头）"
       : "请给链接、粘贴正文，或上传音视频";
     return;
   }
@@ -557,7 +581,7 @@ async function run(){
     const resp = await fetch("/api/analyze", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({url: url, text: text, title: title, upload_id: uploadId})
+      body: JSON.stringify({url: url, text: text, title: "", upload_id: uploadId})
     });
     if(!resp.ok || !resp.body){
       const t = await resp.text();
@@ -630,6 +654,9 @@ function handleEvent(chunk){
     $("file").value = "";
     $("fileLabel").classList.remove("done");
     $("url").value = "";   // 一次读解用完即清：留着下次上传视频时会把旧链接一起提交，报告头被污染
+    urlOverride = false;
+    autosizeUrl();
+    refreshHint();
   }
 }
 
@@ -651,14 +678,19 @@ $("url").addEventListener("keydown", e => {
   if(e.key === "Enter" && (e.ctrlKey || e.metaKey)) run();
 });
 $("url").addEventListener("input", () => {
+  urlOverride = false;   // 内容变了，撤掉之前的强制链接，重新判定
   autosizeUrl();
-  $("urlHint").textContent = "";
+  refreshHint();
+});
+$("urlOverride").addEventListener("click", () => {
+  urlOverride = true;
+  refreshHint();
 });
 
-/* 网址框随内容长高：单行链接 2 行起步，贴进含链接的文字也不挤 */
+/* 输入框随内容长高：链接短则矮、正文长则高，最高约 10 行，再长内部滚动 */
 function autosizeUrl(){
   const el = $("url");
-  const MAX = 200;   // 最高约 6 行，再长内部滚动，别把页面撑破
+  const MAX = 300;   // 最高约 10 行，再长内部滚动，别把页面撑破
   el.style.height = "auto";
   el.style.height = Math.min(el.scrollHeight, MAX) + "px";
   el.style.overflowY = el.scrollHeight > MAX ? "auto" : "hidden";
