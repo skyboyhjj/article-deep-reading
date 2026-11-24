@@ -209,6 +209,12 @@ class TestAnalyzeValidation(Base):
         self.assertEqual(status, 400)
         self.assertIn("过长", json.loads(body)["error"])
 
+    def test_pasted_text_too_short(self):
+        """正文不足 200 字、又没链接/音视频时，进 pipeline 前就该 400，不能白扣额度。"""
+        status, _, body = post_json("/api/analyze", {"text": "太短了"})
+        self.assertEqual(status, 400)
+        self.assertIn("正文太短", json.loads(body)["error"])
+
     def test_chinese_hits_body_limit_first(self):
         """中文 20 万字符 = 60 万字节，先撞 260 KB 那道闸。
 

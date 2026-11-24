@@ -220,7 +220,11 @@ def main() -> int:
     # 「需要回听的地方」只筛高风险项。两者都空时不再出空节，也不再补兜底话。
     chk("无高风险项时不出「需要回听」空节", "需要回听的地方" not in md)
     chk("没有空表格行", "| 1 |  |" not in md)
-    chk("来源空时有占位", "（无链接，仅上传音视频）" in md)
+    chk("上传音视频来源有占位", "（无链接，仅上传音视频）" in md)
+    doc_pasted = dict(doc, kind="pasted")
+    md_pasted = pipeline.render_report("", doc_pasted, triage, {"items": []}, calc, "评述无数字。")
+    chk("粘贴正文来源不误写成上传音视频",
+        "（无链接，粘贴正文）" in md_pasted and "仅上传音视频" not in md_pasted)
     chk("无有效实算有显式提示", "没有形成可判定的实算" in md)
     chk("表头含「原文声称」", "| 原文声称 |" in md)
 

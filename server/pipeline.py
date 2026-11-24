@@ -966,7 +966,13 @@ def render_report(url: str, doc: dict, triage: dict, verify: dict, calc: dict, c
     KIND = KIND_LABEL
     L: list[str] = []
     L.append(f"# 读解：{doc['title'] or url}\n")
-    L.append(f"- 来源：{url or '（无链接，仅上传音视频）'}")
+    if url:
+        src = url
+    elif doc.get("kind") == "video_upload":
+        src = "（无链接，仅上传音视频）"
+    else:
+        src = "（无链接，粘贴正文）"
+    L.append(f"- 来源：{src}")
     L.append(
         f"- 类型：{KIND.get(doc['kind'], doc['kind'])}　体裁判定：{triage.get('genre','未判定')}"
         f"（{triage.get('genre_reason','')}）"

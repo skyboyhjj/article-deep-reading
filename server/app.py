@@ -441,6 +441,11 @@ class Handler(BaseHTTPRequestHandler):
         if len(pasted) > 200_000:
             self._json(400, {"error": "粘贴正文过长（上限 20 万字符）"})
             return
+        # 正文不足 200 字、又没有链接或音视频时，pipeline 也只会回「没有可用输入」。
+        # 与其扣掉额度再报错，不如进 pipeline 前就 400（阈值与 pipeline 的正文判定一致）。
+        if pasted and not upload_id and not url.startswith(("http://", "https://")) and len(pasted) < 200:
+            self._json(400, {"error": "正文太短（不足 200 字），请粘贴完整内容，或改用链接 / 上传音视频"})
+            return
 
         ok, left, state, retry_after = LIMITER.allow(self._client_ip())
         if not ok:
