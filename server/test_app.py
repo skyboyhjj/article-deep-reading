@@ -486,6 +486,27 @@ class TestAnalyzeStream(Base):
         finally:
             fake.unlink(missing_ok=True)
 
+    def test_analyze_keeps_temp_media_on_business_fail(self):
+        """业务失败（fail 帧）也要保住上传件——v2.33 之前会被删。
+
+        pipeline 的失败是「yield fail 后 return」，对 app 而言是循环正常结束。
+        若拿「循环没抛异常」判完成，失败的上传件会在 finally 里被删掉，
+        用户想换个方式重试、或让我们排查，都得重传。
+        现在的判据是「收到 done 帧才算读完」。
+        """
+        app.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        fake = app.UPLOAD_DIR / "abc12345__bad.mp4"
+        fake.write_bytes(b"\0" * 32)
+        try:
+            fail = {"stage": "transcribe", "status": "fail", "code": "DR-4005"}
+            with mock.patch.object(app.pipeline, "analyze", self._fake(fail)):
+                status, _, body = post_json("/api/analyze", {"upload_id": "abc12345"})
+            self.assertEqual(status, 200)
+            self.assertIn("DR-4005", body.decode())
+            self.assertTrue(fake.exists(), "业务失败后上传件被删了，用户重试要重传")
+        finally:
+            fake.unlink(missing_ok=True)
+
 
 class TestExtractUrl(unittest.TestCase):
     """输入框允许整段文字，服务端也要能从里面认出链接。"""

@@ -358,6 +358,7 @@ let runStart = 0;         // 本次读解开始时间（诊断信息里的 elaps
 let curStage = "";        // 流程走到哪个阶段（诊断信息里的 stage）
 let quotaVersion = "";    // 服务端版本：SSE 首帧给，不必另发请求
 let lastRid = "";         // 兜底追踪号：非错误帧里也可能收到
+let maxUploadMb = 0;      // 上传上限：/api/health 给，拿不到就先不拦（交给后端）
 
 /* ================= 错误展示 =================
    一条错误长什么样，由服务端给的 responsibility 决定，不由码段决定：
@@ -701,6 +702,15 @@ function fmtDur(sec){
 }
 
 function uploadFile(f){
+  // 先量体积再传。不量的话，超限文件要白传一趟才被拦，而且超过反代阈值时
+  // 用户看到的是网关的裸 413 页面，不是「上限 50 MB，改用粘贴正文」。
+  if(maxUploadMb && f.size > maxUploadMb * 1024 * 1024){
+    showErr({code:"DR-2002", condition:"fileTooLarge", responsibility:"user",
+             retryable:false, level:"fail", show_code:false, show_diag:false,
+             error:"文件超过上限 " + maxUploadMb + " MB",
+             hint:"压缩后再传，或改用粘贴正文"});
+    return;
+  }
   const xhr = new XMLHttpRequest();
   xhr.open("POST", "/api/upload");
   xhr.setRequestHeader("Content-Type", "application/octet-stream");
@@ -943,6 +953,7 @@ $("dropBtn").addEventListener("click", async () => {
 
 fetch("/api/health").then(r => r.json()).then(h => {
   if(h.version) quotaVersion = h.version;   // 页面一打开就有版本号，诊断信息更完整
+  if(h.max_upload_mb) maxUploadMb = h.max_upload_mb;   // 上传前预校验用
   if(!h.llm){
     // 能力缺失不是用户做错了什么：黄色轻提示，不摆码、也不给诊断
     showErr({stage:"pre", responsibility:"third", retryable:false,

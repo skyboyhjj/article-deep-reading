@@ -239,7 +239,9 @@ def main() -> int:
 
     md_mg = pipeline.render_report("u", doc, triage_merged, {"items": []},
                                    {"items": []}, "评述。")
-    chk("字段合并时降级为列表", "需要回听的地方" in md_mg
+    # 纯文本报告的小节标题是「最该留意的地方」（v2.33 起按有无音频分），
+    # 这里只关心「存疑项有没有渲染出来」，不绑标题
+    chk("字段合并时降级为列表", "模型存疑但未采纳" in md_mg
         and "1. " in md_mg.split("模型存疑但未采纳")[-1])
     chk("降级后内容不丢", "几10万" in md_mg)
 

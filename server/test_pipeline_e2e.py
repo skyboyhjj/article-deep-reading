@@ -187,6 +187,9 @@ def main() -> int:
         ("评述段落存在", "把估算标成了估算" in md),
         ("免责声明存在", "不能替代读者本人对原始出处的核对" in md),
         ("done 事件同时带简约版", bool((done["data"].get("brief") or "").strip())),
+        # v2.33：那一节的标题按有无音频分——粘贴正文的人没有东西可「回听」
+        ("纯文本用「最该留意」", pipeline._review_section_title({"text": "x"}) == "最该留意的地方"),
+        ("有转录用「需要回听」", pipeline._review_section_title({"transcript": "t"}) == "需要回听的地方"),
     ]
     checks += _report_header_checks()
     checks += _brief_checks()

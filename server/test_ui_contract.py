@@ -386,6 +386,20 @@ class TestErrorPresentation(unittest.TestCase):
         self.assertGreaterEqual(self.js.count("showErr("), 7,
                                 "showErr 的调用点太少，有错误路径还在自己拼文案")
 
+    def test_upload_prechecks_size(self):
+        """超限文件不该白传一趟：前端先量体积，直接走 DR-2002。
+
+        不量的话，用户要传满才知道超限；而一旦超过反代的阈值，
+        看到的是网关的裸 413 页面，连「上限多少」都没有。
+        """
+        m = re.search(r"function uploadFile\(f\)\{(.*?)\n\}", self.js, re.S)
+        self.assertTrue(m, "找不到 uploadFile")
+        body = m.group(1)
+        self.assertIn("f.size", body, "上传前没量体积")
+        self.assertIn("maxUploadMb", body, "没有用 health 给的上限")
+        self.assertIn("DR-2002", body, "超限没走码表文案")
+        self.assertIn("max_upload_mb", self.js, "没从 /api/health 取上限")
+
     def test_err_colors_meet_wcag(self):
         for sel in (".err.fail .body", ".err.warn .body"):
             r = css_rule(self.html, sel)

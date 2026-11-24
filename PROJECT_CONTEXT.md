@@ -8,7 +8,7 @@
 
 - 仓库：[skyboyhjj/article-deep-reading](https://github.com/skyboyhjj/article-deep-reading)（public，MIT）
 - 线上部署：**暂无公开实例**，本地或 Docker 自托管
-- 当前版本：**v2.32**（2026-11-24）
+- 当前版本：**v2.33**（2026-11-24）
 
 核心特色：五阶段流水线、五档实算判定、四道证据闸、白名单 AST 求值器、语音画像、视频号 L1 二手路径、手机窄屏适配、20 套 CI 测试。
 
@@ -541,6 +541,17 @@ CI 跑 17 套，全部不花钱、不联网（`test_asr` 缺 ffmpeg 会自行跳
 - **新增守门八**（`test_guards`，3 项）：`text` / `message` / `hint` / `notes` 不许插 exc；帧必须带 `log_exc`；app 必须 pop 并喂日志——三项均反向验证
 - **配套测试**：`test_stream_fail_logs_internal_summary`——页面没有、日志有，两头都要成立（只做前半，排障就只剩一个码）
 - **文件**：`server/pipeline.py`、`server/app.py`、`server/test_guards.py`、`server/test_app.py`
+
+### 39. 线上 v2.32 验收后的修复（v2.33）
+
+- **验收结论**：错误体系本身在线上正常（十二字段、分级、脱敏、DR-4005 首次真实触发全对）；问题出在旁边的工程细节
+- **修 1｜失败别删上传件**：`completed` 的判据从「循环没抛异常」改为「收到 done 帧」。业务失败对 app 是正常结束，旧判据会把上传件删掉（线上实测 `drop` 返回 `removed: 0`）
+- **修 2｜前端先量体积**：`uploadFile()` 用 health 的 `max_upload_mb` 预判，超限直接走 DR-2002，不白传
+- **修 3｜报告标题分场景**：粘贴正文没有音频可听，那节改叫「最该留意的地方」（抽成 `_review_section_title()`）
+- **运维**：README 的 nginx 段补 `client_max_body_size 60m`——实测 55 MB 走应用层、60 MB 被 nginx 拦成裸 413
+- **口径**：`BODY_LIMIT` 注释补明「文案显示 254 KB」（`round(260000/1024)`）
+- **测试**：`test_app` 75、`test_ui_contract` 36、`test_pipeline_e2e` +2
+- **验收报告**：`/sandbox/workspace/验证报告_DeepRead线上_v2.32_20261124.md`（含未覆盖清单：页面渲染、429、4004、真实音频成功路径）
 
 ## 待办
 

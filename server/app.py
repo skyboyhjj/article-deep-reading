@@ -63,13 +63,15 @@ def _parse_trusted(raw: str) -> tuple[frozenset[str], tuple]:
     return frozenset(exact), tuple(nets)
 
 # /api/analyze 的请求体上限（字节）。中文一字 3 字节，故约 8.6 万汉字。
+# 文案里显示的是 round(260000/1024) = 254 KB，别拿「260」去核对——
+# 那只是取整前的近似，两个数都对，说的是不同东西。
 BODY_LIMIT = 260_000
 # 超限时最多额外读掉多少再回复：够覆盖正常误操作，又不给恶意大包留带宽。
 DRAIN_MAX = 5 * 1024 * 1024
 
 # 版本号：/api/health 与 SSE 首帧都带上，用户复制的诊断信息里就有它。
 # 发版时改这一处，CHANGELOG 首个标题必须同号（test_ui_contract.TestVersion 会比对，防漂）。
-APP_VERSION = "2.32"
+APP_VERSION = "2.33"
 
 # 上传：用户自己导出视频号视频后传上来，是拿到「原声」的唯一可靠路径
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "deepread_uploads"
@@ -574,8 +576,12 @@ class Handler(BaseHTTPRequestHandler):
                         # 异常摘要只进日志，并按码表决定是否写日志
                         exc = self._enrich_fail(ev)
                         self._log_error(200, ev["code"], exc)
+                    # 「读完」的判据是收到 done 帧，不是循环没抛异常。
+                    # pipeline 的业务失败是 yield fail 后 return —— 对这里而言是正常结束，
+                    # 若据此判 completed，失败的音视频会在 finally 里被删掉，用户想重试就得重传。
+                    if ev.get("stage") == "done":
+                        completed = True
                     self._sse(ev)
-                completed = True
             except BrokenPipeError:
                 return  # 客户端断开（不算读完，保留上传件以便重试）
             except Exception as exc:  # noqa: BLE001

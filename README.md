@@ -378,6 +378,11 @@ article-deep-reading/
 生产环境建议套一层反向代理。SSE 读解必须关缓冲；但 `proxy_buffering off` 会一并关掉 gzip，所以把 SSE 路径单独拎出来，其余路径开 gzip：
 
 ```nginx
+# 上传上限：必须略高于应用层 MAX_UPLOAD_MB（默认 50）。
+# 写成 60m 是为了让「文件过大」由应用回 DR-2002 的完整文案（含上限数字与改法），
+# 而不是被 nginx 拦成一张裸 413 HTML 页面——线上实测 55 MB 走应用层、60 MB 被拦。
+client_max_body_size 60m;
+
 # gzip：只压文本类；SSE（text/event-stream）与图片不压（text/html 是 nginx 默认类型，无需列出）
 gzip on;
 gzip_vary on;

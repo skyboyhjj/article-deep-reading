@@ -190,6 +190,20 @@ _FIX_PUNCT = "。，、；：！？"
 _FIX_STRONG = ("规则替换", "上下文", "语义", "不通", "前后", "标准译名", "与别处")
 
 
+_AUDIO_KINDS = ("video_upload", "wechat_channel")
+
+
+def _review_section_title(doc: dict) -> str:
+    """报告里那一节的标题：有音频才叫「回听」，纯文本叫「最该留意」。
+
+    粘贴正文、公众号文章都没有东西可听。摆一个「需要回听的地方」，
+    读者第一反应是「报告搞错了对象」，后面写得再对也先丢一分。
+    判据两条：有转录文本，或者是音视频类来源（视频号走 L1 二手，只有总结没有转录）。
+    """
+    has_audio = bool(doc.get("transcript")) or doc.get("kind") in _AUDIO_KINDS
+    return "需要回听的地方" if has_audio else "最该留意的地方"
+
+
 def _fix_risk(fix: dict) -> tuple[str, str]:
     """给一条修正判「类别」与「建议」。
 
@@ -1086,7 +1100,7 @@ def render_report(url: str, doc: dict, triage: dict, verify: dict, calc: dict, c
     risks.sort(key=_risk_rank)
 
     if hot or risks:
-        head("需要回听的地方")
+        head(_review_section_title(doc))
         L.append("这一节不是再列一遍错字，而是挑出**改错代价最大**的几处，"
                  "和**模型拿不准、没有动**的几处。其余改动可以直接采用。\n")
         if hot:
