@@ -154,7 +154,8 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     # ---------- 基础 ----------
-    def _send(self, code: int, body: bytes, ctype: str, headers: dict | None = None) -> None:
+    def _send(self, code: int, body: bytes, ctype: str, headers: dict | None = None,
+              write_body: bool = True) -> None:
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -171,11 +172,12 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in (headers or {}).items():
             self.send_header(k, v)
         self.end_headers()
-        self.wfile.write(body)
+        if write_body:
+            self.wfile.write(body)
 
-    def _json(self, code: int, obj: dict, headers: dict | None = None) -> None:
+    def _json(self, code: int, obj: dict, headers: dict | None = None, write_body: bool = True) -> None:
         self._send(code, json.dumps(obj, ensure_ascii=False).encode(),
-                   "application/json; charset=utf-8", headers)
+                   "application/json; charset=utf-8", headers, write_body=write_body)
 
     def _exceeded(self, retry_after: float | None) -> None:
         """额度用尽：429 + Retry-After，让客户端能明确告知「约 X 后恢复」。"""
@@ -345,22 +347,29 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------- 路由 ----------
     def do_GET(self) -> None:  # noqa: N802
+        self._route_get(write_body=True)
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        """HEAD 与 GET 同头、无 body。分享卡片抓取常先 HEAD 探 og:image，此前 501 会挡掉预览。"""
+        self._route_get(write_body=False)
+
+    def _route_get(self, write_body: bool) -> None:
         path = urlsplit(self.path).path
         if path in ("/", "/index.html"):
             try:
                 body = (WEB / "index.html").read_bytes()
             except OSError:
-                self._json(500, {"error": "前端文件缺失"})
+                self._json(500, {"error": "前端文件缺失"}, write_body=write_body)
                 return
-            self._send(200, body, "text/html; charset=utf-8")
+            self._send(200, body, "text/html; charset=utf-8", write_body=write_body)
             return
         if path == "/og.jpg":
             try:
                 body = (WEB / "og.jpg").read_bytes()
             except OSError:
-                self._json(404, {"error": "not found"})
+                self._json(404, {"error": "not found"}, write_body=write_body)
                 return
-            self._send(200, body, "image/jpeg")
+            self._send(200, body, "image/jpeg", write_body=write_body)
             return
         if path == "/api/health":
             self._json(200, {
@@ -375,9 +384,9 @@ class Handler(BaseHTTPRequestHandler):
                 "rate_limit_per_hour": LIMITER.current_limit(),
                 "rate_limit_backend": type(LIMITER).__name__,
                 "max_concurrent": MAX_CONCURRENT,
-            })
+            }, write_body=write_body)
             return
-        self._json(404, {"error": "not found"})
+        self._json(404, {"error": "not found"}, write_body=write_body)
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path

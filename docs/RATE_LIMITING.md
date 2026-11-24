@@ -143,13 +143,13 @@ docker exec <redis容器> redis-cli DEL dr:cfg:limit
 
 ### 分享场景建议额度
 
-站点面向「分享给同事/群」使用，每 IP 额度不宜低于 **10 次/小时**（一人试两篇 + 分享 2~3 人各试一篇就接近打满）。代码默认值已是 10；线上曾以 `RATE_LIMIT_PER_HOUR=4` 启动，偏紧，可用热配置即时放宽（无需重建容器）：
+站点面向「分享给同事/群」使用，每 IP 额度不宜低于 **10 次/小时**（一人试两篇 + 分享 2~3 人各试一篇就接近打满）。代码默认值已是 10；线上当前 `RATE_LIMIT_PER_HOUR=20`（compose 与热配置已同步为 20，早先曾以 4 启动、偏紧）。可用热配置即时调整（无需重建容器）：
 
 ```bash
 docker exec <redis容器> redis-cli SET dr:cfg:limit 20
 ```
 
-> 注意：热配置即时生效，但**不落盘到 compose**。若用热配置放宽额度，也要同步把 `docker-compose.yml` 的 `RATE_LIMIT_PER_HOUR` 改成同样值——否则重建容器时热配置若失效（如 Redis 键被清/过期），会静默退回 compose 里写死的旧值（如 4），限流又变紧。改额度记住「两处同步」。
+> 注意：热配置即时生效，但**不落盘到 compose**。若用热配置放宽额度，也要同步把 `docker-compose.yml` 的 `RATE_LIMIT_PER_HOUR` 改成同样值——否则重建容器时热配置若失效（如 Redis 键被清/过期），会静默退回 compose 里写死的旧值（当前为 20），限流又变紧。改额度记住「两处同步」。
 
 ### 键与盐（v2.20）
 

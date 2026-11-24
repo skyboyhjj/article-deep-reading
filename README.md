@@ -375,14 +375,31 @@ article-deep-reading/
 
 ## 部署
 
-生产环境建议套一层反向代理（SSE 必须关缓冲）：
+生产环境建议套一层反向代理。SSE 读解必须关缓冲；但 `proxy_buffering off` 会一并关掉 gzip，所以把 SSE 路径单独拎出来，其余路径开 gzip：
 
 ```nginx
-location / {
+# gzip：只压文本类；SSE（text/event-stream）与图片不压（text/html 是 nginx 默认类型，无需列出）
+gzip on;
+gzip_vary on;
+gzip_min_length 1024;
+gzip_proxied any;               # 关键：反代响应默认不 gzip，必须显式开启
+gzip_comp_level 5;
+gzip_types text/plain text/css text/javascript application/javascript application/json application/xml image/svg+xml;
+
+# SSE 读解：不缓冲，流式事件逐帧推送
+location /api/analyze {
     proxy_pass http://127.0.0.1:8000;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_buffering off;          # 关键：否则流式事件会被攒着一次性吐出
+    proxy_read_timeout 300s;
+}
+
+# 其余（首页 / 健康检查 / 上传 / 图片）：正常缓冲 + gzip
+location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
     proxy_read_timeout 300s;
 }
 ```

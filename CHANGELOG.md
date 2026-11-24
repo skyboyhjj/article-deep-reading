@@ -6,6 +6,16 @@
 
 ---
 
+## v2.27 · 2026-11-24
+
+**补 HEAD 支持（分享卡片 og:image 探测不再 501）+ 部署文档补 gzip 与限流口径。**
+
+- `GET` 各路径补对应 `HEAD`：返回同头（含 `Content-Length`）但不带 body。此前 `HEAD /og.jpg` 返回 501，会挡掉部分社交平台抓取分享缩略图时的 HEAD 探测。
+- `README.md` 部署节：nginx 示例拆出 `/api/analyze`（关缓冲保 SSE）与其余路径（开 gzip），并说明 `gzip_proxied any` 的必要性。
+- `docs/RATE_LIMITING.md`：线上额度口径从「曾以 4 启动」更正为「当前 20」（compose 与热配置已同步）。
+
+---
+
 ## v2.26 · 2026-11-24
 
 **两处后端修正：粘贴正文的「来源」不再误写成上传音视频；接口补最短正文校验。**

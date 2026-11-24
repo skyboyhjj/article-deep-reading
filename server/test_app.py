@@ -121,6 +121,14 @@ class TestGet(Base):
         self.assertEqual(headers.get("Content-Type"), "image/jpeg")
         self.assertEqual(body[:3], b"\xff\xd8\xff")
 
+    def test_head_og_image(self):
+        # HEAD /og.jpg：分享卡片抓取常先 HEAD 探 og:image，此前 501 会挡掉预览。
+        status, headers, body = request("HEAD", "/og.jpg")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("Content-Type"), "image/jpeg")
+        self.assertGreater(int(headers.get("Content-Length")), 0)
+        self.assertEqual(body, b"")   # HEAD 无 body
+
     def test_health_shape_and_no_secret(self):
         os.environ["LLM_API_KEY"] = "sk-should-never-appear"
         try:
